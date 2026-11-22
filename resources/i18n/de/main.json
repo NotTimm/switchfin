@@ -315,7 +315,8 @@
         "header": "Aussehen (benötigt Neustart)",
         "1": "Auto",
         "2": "Hell",
-        "3": "Dunkel"
+        "3": "Dunkel",
+        "4": "Schwarz"
       },
       "language": {
         "header": "Sprache (benötigt Neustart)",

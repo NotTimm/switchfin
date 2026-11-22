@@ -315,7 +315,8 @@
         "header": "Tema (requer reinicialização)",
         "1": "Padrão do sistema",
         "2": "Claro",
-        "3": "Escuro"
+        "3": "Escuro",
+        "4": "Preto"
       },
       "language": {
         "header": "Idioma (Requer Reinicialização)",

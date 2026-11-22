@@ -315,7 +315,8 @@
         "header": "Theme (restart required)",
         "1": "Auto",
         "2": "Light",
-        "3": "Dark"
+        "3": "Dark",
+        "4": "Black"
       },
       "language": {
         "header": "Language (restart required)",
