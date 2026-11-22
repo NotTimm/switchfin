@@ -207,7 +207,8 @@ void MPVCore::init() {
 #elif defined(__PS4__)
     mpv_set_option_string(mpv, "vd-lavc-threads", "6");
 #elif defined(__PSV__)
-    mpv_set_option_string(mpv, "vd-lavc-threads", "4");
+    // Apps get 3 of the Vita's 4 cores; the 4th is reserved for the system
+    mpv_set_option_string(mpv, "vd-lavc-threads", "3");
 #if defined(BOREALIS_USE_GXM)
     // Hand frames to the VO ~2 vsyncs early. Rendering does not block for the
     // target time (see mpv_params), so this is slack for a slow UI frame
