@@ -418,6 +418,7 @@ void SettingTab::onCreate() {
             "main/setting/others/theme/1"_i18n,
             "main/setting/others/theme/2"_i18n,
             "main/setting/others/theme/3"_i18n,
+            "main/setting/others/theme/4"_i18n,
         },
         themeIndex, [themeIndex](int selected) {
             if (themeIndex == selected) return;

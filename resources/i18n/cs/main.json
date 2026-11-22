@@ -315,7 +315,8 @@
         "header": "Motiv (vyžaduje restart)",
         "1": "Automaticky",
         "2": "Světlý",
-        "3": "Tmavý"
+        "3": "Tmavý",
+        "4": "Černý"
       },
       "language": {
         "header": "Jazyk (vyžaduje restart)",
