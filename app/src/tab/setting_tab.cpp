@@ -186,6 +186,17 @@ void SettingTab::onCreate() {
         conf.setItem(AppConfig::PLAYER_LOW_QUALITY, value);
     });
 
+#if defined(__PSV__)
+    btnLatencyHacks->init("main/setting/playback/latency_hacks"_i18n, MPVCore::LATENCY_HACKS, [&conf](bool value) {
+        if (MPVCore::LATENCY_HACKS == value) return;
+        MPVCore::LATENCY_HACKS = value;
+        MPVCore::instance().restart();
+        conf.setItem(AppConfig::PLAYER_LATENCY_HACKS, value);
+    });
+#else
+    btnLatencyHacks->setVisibility(brls::Visibility::GONE);
+#endif
+
     btnSubFallback->init("main/setting/playback/subs_fallback"_i18n, MPVCore::SUBS_FALLBACK, [&conf](bool value) {
         if (MPVCore::SUBS_FALLBACK == value) return;
         MPVCore::SUBS_FALLBACK = value;

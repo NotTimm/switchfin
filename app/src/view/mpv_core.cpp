@@ -189,7 +189,7 @@ void MPVCore::init() {
     mpv_set_option_string(mpv, "vd-lavc-threads", "4");
     mpv_set_option_string(mpv, "fbo-format", "rgba8");
     // Fix vo_wait_frame() cannot be wakeup
-    mpv_set_option_string(mpv, "video-latency-hacks", "yes");
+    mpv_set_option_string(mpv, "video-latency-hacks", MPVCore::LATENCY_HACKS ? "yes" : "no");
 #elif defined(ANDROID)
     mpv_set_option_string(mpv, "gpu-context", "android");
     mpv_set_option_string(mpv, "opengl-es", "yes");
