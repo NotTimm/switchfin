@@ -229,6 +229,7 @@
       "transcodec": "Codec",
       "audio_channels": "Audio Channels",
       "video_quality": "Video Quality",
+      "max_resolution": "Max resolution",
       "subsync": "Subtitle Sync"
     },
     "transcode": {

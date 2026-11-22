@@ -162,6 +162,10 @@ public:
 
     inline static bool FORCE_DIRECTPLAY = false;
 
+    // Max video height requested from the server (PSV only).
+    // 544 matches the Vita screen, 720 lets more files direct play.
+    inline static int MAX_HEIGHT = 720;
+
     // 触发倍速时的默认值，单位为 %
     inline static int VIDEO_SPEED = 200;
 

@@ -212,7 +212,16 @@ void SettingTab::onCreate() {
 
 #if defined(__PSV__)
     selectorCodec->setVisibility(brls::Visibility::GONE);
+
+    auto& maxHeightOption = conf.getOptions(AppConfig::PLAYER_MAX_HEIGHT);
+    selectorMaxHeight->init("main/setting/playback/max_resolution"_i18n, maxHeightOption.options,
+        conf.getValueIndex(AppConfig::PLAYER_MAX_HEIGHT, 1), [&maxHeightOption](int selected) {
+            MPVCore::MAX_HEIGHT = maxHeightOption.values[selected];
+            AppConfig::instance().setItem(AppConfig::PLAYER_MAX_HEIGHT, MPVCore::MAX_HEIGHT);
+        });
 #else
+    selectorMaxHeight->setVisibility(brls::Visibility::GONE);
+
     auto& codecOption = conf.getOptions(AppConfig::TRANSCODEC);
     selectorCodec->init("main/setting/playback/transcodec"_i18n, {"AVC/H264", "HEVC/H265", "AV1"},
         conf.getOptionIndex(AppConfig::TRANSCODEC), [&codecOption](int selected) {

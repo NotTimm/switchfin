@@ -179,7 +179,11 @@ void PlayerView::playMedia(const uint64_t seekTicks) {
 #if defined(__PS4__)
     int maxAllowedHeight = 1080;
 #elif defined(__PSV__)
-    int maxAllowedHeight = 720;
+    // The Vita screen is 960x544: asking for 544p avoids decoding extra
+    // pixels and a GPU downscale on every frame, at the cost of the server
+    // transcoding 720p files that could otherwise direct play.
+    int maxAllowedHeight = MPVCore::MAX_HEIGHT <= 544 ? 544 : 720;
+    int maxAllowedWidth = MPVCore::MAX_HEIGHT <= 544 ? 960 : 1280;
 #else
     int maxAllowedHeight = brls::Application::windowHeight;
     if (MPVCore::VIDEO_QUALITY <= 0) {
@@ -209,6 +213,12 @@ void PlayerView::playMedia(const uint64_t seekTicks) {
             {"Condition", "LessThanEqual"},
             {"Property", "VideoLevel"},
             {"Value", 40},
+            {"IsRequired", false},
+        },
+        {
+            {"Condition", "LessThanEqual"},
+            {"Property", "Width"},
+            {"Value", maxAllowedWidth},
             {"IsRequired", false},
         },
 #endif
