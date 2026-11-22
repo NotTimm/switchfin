@@ -91,6 +91,7 @@ std::unordered_map<AppConfig::Item, AppConfig::Option> AppConfig::settingMap = {
     {PLAYER_ASPECT, {"player_aspect", {"auto", "stretch", "crop", "4:3", "16:9"}}},
     {PLAYER_TV_MODE, {"player_tv_mode"}},
     {PLAYER_LATENCY_HACKS, {"player_latency_hacks"}},
+    {PLAYER_MAX_HEIGHT, {"player_max_height", {"544p", "720p"}, {544, 720}}},
     {DANMAKU, {"danmaku"}},
     {DANMAKU_ON, {"danmaku_on"}},
     {DANMAKU_STYLE_AREA, {"danmaku_style_area", {"1/4", "1/2", "3/4", "1"}, {25, 50, 75, 100}}},
@@ -357,6 +358,7 @@ bool AppConfig::init() {
     MPVCore::OSD_TV_MODE = this->getItem(PLAYER_TV_MODE, false);
 #if defined(__PSV__)
     MPVCore::LATENCY_HACKS = this->getItem(PLAYER_LATENCY_HACKS, MPVCore::LATENCY_HACKS);
+    MPVCore::MAX_HEIGHT = this->getItem(PLAYER_MAX_HEIGHT, MPVCore::MAX_HEIGHT);
 #endif
 
     // 初始化弹幕相关内容
