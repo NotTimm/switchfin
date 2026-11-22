@@ -29,6 +29,27 @@
 
 typedef std::unordered_map<std::string, std::string> MPVMap;
 
+#if defined(BOREALIS_USE_GXM)
+#include <atomic>
+
+class MPVCore;
+
+/// Renders the pending mpv frame once per main loop iteration.
+/// brls tickings run before Application::frame(), so the frame is drawn into
+/// the FBO before the UI samples it and shows up in the same UI frame, instead
+/// of one frame later as with brls::sync (which runs after frame()).
+class MPVRenderTicking : public brls::Ticking {
+public:
+    explicit MPVRenderTicking(MPVCore *core) : core(core) {}
+
+protected:
+    bool onUpdate(brls::Time delta) override;
+
+private:
+    MPVCore *core;
+};
+#endif
+
 class MPVCore : public brls::Singleton<MPVCore> {
 public:
     MPVCore();
@@ -38,6 +59,11 @@ public:
     void restart();
 
     void init();
+
+#if defined(BOREALIS_USE_GXM)
+    /// Render the frame mpv asked for in on_update(), if any (main thread only)
+    void renderPendingFrame();
+#endif
 
     void clean();
 
@@ -234,11 +260,17 @@ private:
         .format = SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_RGBA,
     };
     int flip_y{1};
-    mpv_render_param mpv_params[3] = {
+    // Do not block the UI thread until the frame's target time: frames are
+    // queued early (video-timing-offset) and simply shown on the next UI frame.
+    int block_for_target_time{0};
+    mpv_render_param mpv_params[4] = {
         {MPV_RENDER_PARAM_FLIP_Y, &flip_y},
         {MPV_RENDER_PARAM_GXM_FBO, &mpv_fbo},
+        {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block_for_target_time},
         {MPV_RENDER_PARAM_INVALID, nullptr},
     };
+    std::atomic<bool> render_pending{false};
+    MPVRenderTicking renderTicking{this};
 #else
     GLint default_framebuffer = 0;
     mpv_opengl_fbo mpv_fbo;
