@@ -80,9 +80,30 @@ static void deleteSurfaceObj() {
 }
 #endif
 
+#if defined(BOREALIS_USE_GXM)
+bool MPVRenderTicking::onUpdate(brls::Time delta) {
+    (void)delta;
+    core->renderPendingFrame();
+    return true;
+}
+
+void MPVCore::renderPendingFrame() {
+    if (!mpv_context || !render_pending.exchange(false)) return;
+    uint64_t flags = mpv_render_context_update(mpv_context);
+    if (flags & MPV_RENDER_UPDATE_FRAME) {
+        mpv_render_context_render(mpv_context, mpv_params);
+        mpv_render_context_report_swap(mpv_context);
+    }
+}
+#endif
+
 void MPVCore::on_update(void *self) {
-#if defined(MPV_SW_RENDER) || defined(BOREALIS_USE_GXM)
-    // SW/GXM 在回调中直接渲染，必须调用 update()。
+#if defined(BOREALIS_USE_GXM)
+    // Called from an mpv thread: only flag it, MPVRenderTicking renders on the
+    // main thread before the next UI frame.
+    reinterpret_cast<MPVCore *>(self)->render_pending = true;
+#elif defined(MPV_SW_RENDER)
+    // SW 在回调中直接渲染，必须调用 update()。
     MPVCore *mpv = reinterpret_cast<MPVCore *>(self);
     brls::sync([mpv]() {
         if (!mpv->mpv_context) return;
@@ -187,6 +208,12 @@ void MPVCore::init() {
     mpv_set_option_string(mpv, "vd-lavc-threads", "6");
 #elif defined(__PSV__)
     mpv_set_option_string(mpv, "vd-lavc-threads", "4");
+#if defined(BOREALIS_USE_GXM)
+    // Hand frames to the VO ~2 vsyncs early. Rendering does not block for the
+    // target time (see mpv_params), so this is slack for a slow UI frame
+    // instead of the frame arriving late and being dropped.
+    mpv_set_option_string(mpv, "video-timing-offset", "0.033");
+#endif
     mpv_set_option_string(mpv, "fbo-format", "rgba8");
     // Fix vo_wait_frame() cannot be wakeup
     mpv_set_option_string(mpv, "video-latency-hacks", MPVCore::LATENCY_HACKS ? "yes" : "no");
@@ -343,6 +370,9 @@ void MPVCore::init() {
     // set render callback
     mpv_render_context_set_update_callback(mpv_context, on_update, this);
 #endif
+#if defined(BOREALIS_USE_GXM)
+    renderTicking.start();
+#endif
 
     focusSubscription = brls::Application::getWindowFocusChangedEvent()->subscribe([this](bool focus) {
         static bool playing = false;
@@ -380,6 +410,10 @@ void MPVCore::clean() {
     brls::Application::getWindowSizeChangedEvent()->unsubscribe(sizeSubscription);
 
     brls::Logger::info("trying free mpv context");
+#if defined(BOREALIS_USE_GXM)
+    renderTicking.stop();
+    render_pending = false;
+#endif
     if (this->mpv_context) {
         mpv_render_context_free(this->mpv_context);
         this->mpv_context = nullptr;
