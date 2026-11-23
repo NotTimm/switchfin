@@ -316,7 +316,8 @@
         "header": "Coloris du thème (nécessite un redémarrage)",
         "1": "Suivant le système",
         "2": "Mode clair",
-        "3": "Mode sombre"
+        "3": "Mode sombre",
+        "4": "Noir"
       },
       "language": {
         "header": "Langue (nécessite un redémarrage)",

@@ -315,7 +315,8 @@
         "header": "Tema (yeniden başlatma gerekli)",
         "1": "Otomatik",
         "2": "Aydınlık",
-        "3": "Karanlık"
+        "3": "Karanlık",
+        "4": "Siyah"
       },
       "language": {
         "header": "Dil (yeniden başlatma gerekli)",

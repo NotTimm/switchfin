@@ -52,7 +52,7 @@ constexpr uint32_t MINIMUM_WINDOW_HEIGHT = 360;
 #include <lunasvg.h>
 
 std::unordered_map<AppConfig::Item, AppConfig::Option> AppConfig::settingMap = {
-    {APP_THEME, {"app_theme", {"auto", "light", "dark"}}},
+    {APP_THEME, {"app_theme", {"auto", "light", "dark", "black"}}},
     {APP_LANG, {"app_lang", {brls::LOCALE_AUTO, brls::LOCALE_EN_US, brls::LOCALE_ZH_HANS, brls::LOCALE_ZH_HANT,
                                 brls::LOCALE_JA, brls::LOCALE_Ko, brls::LOCALE_RU, brls::LOCALE_DE, brls::LOCALE_FR,
                                 brls::LOCALE_ES, brls::LOCALE_PT, "cs", "uk", "tr", "vi"}}},
@@ -434,7 +434,8 @@ bool AppConfig::init() {
         std::string appTheme = this->getItem(APP_THEME, std::string("auto"));
         if (appTheme == "light") {
             brls::Application::getPlatform()->setThemeVariant(brls::ThemeVariant::LIGHT);
-        } else if (appTheme == "dark") {
+        } else if (appTheme == "dark" || appTheme == "black") {
+            // black reuses the dark variant; initThemes() repaints it pure black
             brls::Application::getPlatform()->setThemeVariant(brls::ThemeVariant::DARK);
         }
 
@@ -846,6 +847,24 @@ void AppConfig::initThemes() {
     // 深浅配色通用的灰色字体颜色
     this->addColor(brls::ThemeVariant::LIGHT, "font/grey", nvgRGB(148, 153, 160));
     this->addColor(brls::ThemeVariant::DARK, "font/grey", nvgRGB(148, 153, 160));
+
+    // Black: dark variant with pure black backgrounds, so OLED pixels turn off
+    if (this->getItem(APP_THEME, std::string("auto")) == "black") {
+        auto& dark = brls::Theme::getDarkTheme();
+        dark.addColor("brls/clear", nvgRGB(0, 0, 0));
+        dark.addColor("brls/background", nvgRGB(0, 0, 0));
+        dark.addColor("brls/sidebar/background", nvgRGB(0, 0, 0));
+        dark.addColor("brls/sidebar/separator", nvgRGB(40, 40, 40));
+        dark.addColor("brls/header/border", nvgRGB(40, 40, 40));
+        dark.addColor("brls/highlight/background", nvgRGB(20, 20, 20));
+        dark.addColor("brls/button/default_enabled_background", nvgRGB(30, 30, 30));
+        dark.addColor("brls/button/default_disabled_background", nvgRGB(30, 30, 30));
+        // cards and skeletons stay slightly lifted so they remain visible
+        this->addColor(brls::ThemeVariant::DARK, "color/surface", nvgRGB(14, 14, 14));
+        this->addColor(brls::ThemeVariant::DARK, "color/grey_1", nvgRGB(22, 22, 22));
+        this->addColor(brls::ThemeVariant::DARK, "color/grey_2", nvgRGB(18, 18, 18));
+        this->addColor(brls::ThemeVariant::DARK, "color/line", nvgRGB(40, 40, 40));
+    }
 
     if (brls::Application::ORIGINAL_WINDOW_HEIGHT == 544) {
         brls::getStyle().addMetric("app/album/height", 215);

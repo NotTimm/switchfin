@@ -315,7 +315,8 @@
         "header": "Tema (requiere reinicio)",
         "1": "Automático",
         "2": "Claro",
-        "3": "Oscuro"
+        "3": "Oscuro",
+        "4": "Negro"
       },
       "language": {
         "header": "Idioma (necesita reiniciar)",
