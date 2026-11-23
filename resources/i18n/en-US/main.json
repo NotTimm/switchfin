@@ -169,6 +169,10 @@
   },
   "download": {
     "quality": "Download Quality",
+    "background": "Background Downloads",
+    "background_unavailable": "Background downloads need taiHEN on firmware 3.60-3.74",
+    "background_cancel": "Also remove it from the notification tray",
+    "background_failed": "Removed from the notification tray before it finished",
     "original": "Original",
     "start": "Download",
     "cancel": "Cancel Download",

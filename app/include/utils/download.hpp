@@ -1,6 +1,7 @@
 #pragma once
 
 #include <borealis/core/singleton.hpp>
+#include <borealis/core/timer.hpp>
 #include <nlohmann/json.hpp>
 #include <map>
 #include <mutex>
@@ -45,11 +46,12 @@ struct DownloadItem {
     uint64_t totalBytes = 0;
     uint64_t downloadedBytes = 0;
     std::string errorMessage;
+    int bgdlId = -1;             // PS Vita system downloader task, -1 when downloading in-app
     bool pendingRemove = false;  // transient, not persisted
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DownloadItem, itemId, name, type, seriesId, seriesName,
     seasonIndex, episodeIndex, productionYear, runTimeTicks, imagePrimaryTag, mediaSourceId, etag, quality, status,
-    filePath, totalBytes, downloadedBytes, errorMessage);
+    filePath, totalBytes, downloadedBytes, errorMessage, bgdlId);
 
 class DownloadManager : public brls::Singleton<DownloadManager> {
 public:
@@ -79,6 +81,9 @@ private:
     void processQueue();
     void doDownload(const std::string& itemId);
     std::string buildDownloadUrl(const DownloadItem& item) const;
+    std::string backgroundTitle(const DownloadItem& item) const;
+    void forgetBackground(int id);
+    void pollBackground();
 
     mutable std::mutex mutex;
     std::vector<DownloadItem> items;
@@ -86,4 +91,5 @@ private:
 
     ProgressEvent progressEvent;
     StatusEvent statusEvent;
+    brls::RepeatingTimer backgroundTimer;  // polls system downloader tasks (PS Vita)
 };

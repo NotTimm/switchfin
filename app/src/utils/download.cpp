@@ -4,6 +4,11 @@
 #include "utils/misc.hpp"
 #include "api/jellyfin.hpp"
 #include "view/mpv_core.hpp"
+#ifdef __PSV__
+#include "utils/psv_bgdl.hpp"
+#endif
+
+using namespace brls::literals;
 
 namespace {
 
@@ -33,11 +38,30 @@ std::string DownloadManager::downloadDir() const { return AppConfig::instance().
 void DownloadManager::init() {
     this->loadIndex();
 
-    std::lock_guard<std::mutex> lock(this->mutex);
-    for (auto& item : this->items) {
-        if (item.status == DownloadStatus::Downloading) item.status = DownloadStatus::Queued;
+    bool pendingBackground = false;
+    {
+        std::lock_guard<std::mutex> lock(this->mutex);
+        for (auto& item : this->items) {
+            // System downloader tasks keep running while the app is closed;
+            // pollBackground() picks up their result.
+            if (item.status == DownloadStatus::Downloading && item.bgdlId >= 0) {
+                pendingBackground = true;
+                continue;
+            }
+            if (item.status == DownloadStatus::Downloading) item.status = DownloadStatus::Queued;
+        }
+        this->saveIndex();
     }
-    this->saveIndex();
+
+#ifdef __PSV__
+    // The plugin is also needed to finish tasks queued in an earlier session.
+    if (AppConfig::instance().getItem(AppConfig::DOWNLOAD_BACKGROUND, true) || pendingBackground) psv_bgdl::init();
+    this->backgroundTimer.setCallback([this]() { this->pollBackground(); });
+    this->backgroundTimer.start(2000);
+    this->pollBackground();
+#else
+    (void)pendingBackground;
+#endif
 }
 
 void DownloadManager::loadIndex() {
@@ -131,6 +155,7 @@ void DownloadManager::resumeQueue() { this->processQueue(); }
 void DownloadManager::cancelDownload(const std::string& itemId) {
     DownloadStatus result = DownloadStatus::NotFound;
     bool active = false;
+    int background = -1;
     {
         std::lock_guard<std::mutex> lock(this->mutex);
 
@@ -147,8 +172,18 @@ void DownloadManager::cancelDownload(const std::string& itemId) {
                 result = DownloadStatus::Cancelled;
                 break;
             }
+            if (!active && d->itemId == itemId && d->status == DownloadStatus::Downloading && d->bgdlId >= 0) {
+                background = d->bgdlId;
+                d->status = DownloadStatus::Cancelled;
+                d->bgdlId = -1;
+                this->saveIndex();
+                result = DownloadStatus::Cancelled;
+                break;
+            }
         }
     }
+
+    if (background >= 0) this->forgetBackground(background);
 
     // Fire outside the lock: subscribers re-enter findItem(), which locks it.
     if (!active) this->statusEvent.fire(itemId, result);
@@ -158,6 +193,7 @@ void DownloadManager::cancelDownload(const std::string& itemId) {
 
 void DownloadManager::removeDownload(const std::string& itemId) {
     bool removed = false;
+    int background = -1;
     {
         std::lock_guard<std::mutex> lock(this->mutex);
 
@@ -173,6 +209,7 @@ void DownloadManager::removeDownload(const std::string& itemId) {
         } else {
             for (auto d = this->items.begin(); d != this->items.end(); ++d) {
                 if (d->itemId == itemId) {
+                    if (d->status == DownloadStatus::Downloading) background = d->bgdlId;
                     this->items.erase(d);
                     this->saveIndex();
                     removed = true;
@@ -181,6 +218,8 @@ void DownloadManager::removeDownload(const std::string& itemId) {
             }
         }
     }
+
+    if (background >= 0) this->forgetBackground(background);
 
     if (removed) {
         removeDirAsync(this->downloadDir() + "/" + itemId);
@@ -299,6 +338,7 @@ void DownloadManager::doDownload(const std::string& itemId) {
     DownloadQuality quality = DownloadQuality::Original;
     std::string url;
     std::string etag;
+    std::string title;
     HTTP::Cancel cancel;
     {
         std::lock_guard<std::mutex> lock(this->mutex);
@@ -310,13 +350,21 @@ void DownloadManager::doDownload(const std::string& itemId) {
         quality = it->quality;
         etag = it->etag;
         url = this->buildDownloadUrl(*it);
+        title = this->backgroundTitle(*it);
 
         auto c = this->cancels.find(itemId);
         cancel = c == this->cancels.end() ? std::make_shared<std::atomic_bool>(false) : c->second;
     }
     std::string itemDir = this->downloadDir() + "/" + itemId;
+#ifdef __PSV__
+    bool useBackground =
+        AppConfig::instance().getItem(AppConfig::DOWNLOAD_BACKGROUND, true) && psv_bgdl::available();
+#else
+    bool useBackground = false;
+#endif
 
-    ThreadPool::instance().submit([this, itemId, imagePrimaryTag, quality, url, itemDir, etag, cancel](HTTP&) {
+    ThreadPool::instance().submit([this, itemId, imagePrimaryTag, quality, url, itemDir, etag, title, useBackground,
+                                      cancel](HTTP&) {
         auto& conf = AppConfig::instance();
         std::string server = conf.getUrl();
         std::string detailUrl = server + fmt::format(fmt::runtime(jellyfin::apiUserItem), conf.getUserId(), itemId);
@@ -436,6 +484,53 @@ void DownloadManager::doDownload(const std::string& itemId) {
                 }
             }
         }
+
+#ifdef __PSV__
+        // Hand the video to the system downloader: it keeps going in the
+        // notification tray while the app is suspended or closed.
+        if (useBackground && !cancel->load()) {
+            int id = psv_bgdl::queue(title, url, itemDir + "/" + fileName);
+            if (id >= 0) {
+                brls::sync([this, itemId, itemDir, id, cancel]() {
+                    bool removed = false;
+                    bool cancelled = false;
+                    {
+                        std::lock_guard<std::mutex> lock(this->mutex);
+                        for (auto it = this->items.begin(); it != this->items.end(); ++it) {
+                            if (it->itemId != itemId) continue;
+                            if (it->pendingRemove) {
+                                removed = true;
+                                this->items.erase(it);
+                            } else if (cancel->load()) {
+                                cancelled = true;
+                                it->status = DownloadStatus::Cancelled;
+                            } else {
+                                it->bgdlId = id;
+                            }
+                            break;
+                        }
+                        this->cancels.erase(itemId);
+                        this->saveIndex();
+                    }
+
+                    if (removed || cancelled) this->forgetBackground(id);
+                    if (removed) {
+                        this->statusEvent.fire(itemId, DownloadStatus::NotFound);
+                        removeDirAsync(itemDir);
+                    } else if (cancelled) {
+                        this->statusEvent.fire(itemId, DownloadStatus::Cancelled);
+                    }
+                    // The system downloader runs its own queue, so start the next item.
+                    this->processQueue();
+                });
+                return;
+            }
+            brls::Logger::warning("bgdl: falling back to in-app download for {}", itemId);
+        }
+#else
+        (void)useBackground;
+        (void)title;
+#endif
 
         auto lastProgress = std::make_shared<std::chrono::steady_clock::time_point>();
         auto resumeOffset = std::make_shared<curl_off_t>(0);
@@ -561,4 +656,74 @@ void DownloadManager::doDownload(const std::string& itemId) {
         brls::Logger::info("Download completed: {}", itemId);
         finish(DownloadStatus::Completed, "");
     });
+}
+
+std::string DownloadManager::backgroundTitle(const DownloadItem& item) const {
+    if (item.seriesName.empty()) return item.name;
+    return fmt::format("{} S{:02}E{:02} {}", item.seriesName, item.seasonIndex, item.episodeIndex, item.name);
+}
+
+void DownloadManager::forgetBackground(int id) {
+#ifdef __PSV__
+    psv_bgdl::forget(id);
+    // The system downloader has no cancel call we can make; the task stays in
+    // the notification tray until the user removes it there.
+    brls::Application::notify("main/download/background_cancel"_i18n);
+#else
+    (void)id;
+#endif
+}
+
+// Checks system downloader tasks (PS Vita) and updates their items.
+void DownloadManager::pollBackground() {
+#ifdef __PSV__
+    struct Update {
+        std::string itemId;
+        bool statusChanged;
+        DownloadStatus status;
+        int64_t now;
+        int64_t total;
+    };
+    std::vector<Update> updates;
+    {
+        std::lock_guard<std::mutex> lock(this->mutex);
+        bool dirty = false;
+        for (auto& item : this->items) {
+            if (item.status != DownloadStatus::Downloading || item.bgdlId < 0) continue;
+
+            std::string dest = this->downloadDir() + "/" + item.itemId + "/" + item.filePath;
+            int64_t now = psv_bgdl::downloadedBytes(item.bgdlId);
+            std::error_code ec;
+            if (now < 0 && fs::exists(dest, ec)) {
+                // The plugin moved the finished file into place.
+                auto size = fs::file_size(dest, ec);
+                if (!ec) item.totalBytes = item.downloadedBytes = size;
+                item.status = DownloadStatus::Completed;
+                item.bgdlId = -1;
+                item.errorMessage.clear();
+                dirty = true;
+                updates.push_back({item.itemId, true, item.status, 0, 0});
+            } else if (!psv_bgdl::exists(item.bgdlId)) {
+                // The task was removed from the notification tray before it finished.
+                item.status = DownloadStatus::Failed;
+                item.bgdlId = -1;
+                item.errorMessage = "main/download/background_failed"_i18n;
+                dirty = true;
+                updates.push_back({item.itemId, true, item.status, 0, 0});
+            } else if (now >= 0 && static_cast<uint64_t>(now) != item.downloadedBytes) {
+                item.downloadedBytes = now;
+                updates.push_back({item.itemId, false, item.status, now, static_cast<int64_t>(item.totalBytes)});
+            }
+        }
+        if (dirty) this->saveIndex();
+    }
+
+    // Fire outside the lock: subscribers re-enter findItem().
+    for (const auto& u : updates) {
+        if (u.statusChanged)
+            this->statusEvent.fire(u.itemId, u.status);
+        else
+            this->progressEvent.fire(u.itemId, u.now, u.total);
+    }
+#endif
 }
