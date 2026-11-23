@@ -4,6 +4,9 @@
 #include "utils/misc.hpp"
 #include "api/jellyfin.hpp"
 #include "view/mpv_core.hpp"
+#ifdef __PSV__
+#include "utils/vita_bgdl.hpp"
+#endif
 
 namespace {
 
@@ -300,6 +303,9 @@ void DownloadManager::doDownload(const std::string& itemId) {
     std::string url;
     std::string etag;
     HTTP::Cancel cancel;
+#ifdef __PSV__
+    std::string bgdlTitle;
+#endif
     {
         std::lock_guard<std::mutex> lock(this->mutex);
         auto it = std::find_if(this->items.begin(), this->items.end(),
@@ -313,7 +319,39 @@ void DownloadManager::doDownload(const std::string& itemId) {
 
         auto c = this->cancels.find(itemId);
         cancel = c == this->cancels.end() ? std::make_shared<std::atomic_bool>(false) : c->second;
+#ifdef __PSV__
+        bgdlTitle = it->seriesName.empty() ? it->name : fmt::format("{} - {}", it->seriesName, it->name);
+#endif
     }
+#ifdef __PSV__
+    // Experimental: hand the download to the system download service, which
+    // keeps it running in the background with a status bar notification.
+    if (AppConfig::instance().getItem(AppConfig::DOWNLOAD_BGDL, false)) {
+        std::string error;
+        int id = VitaBgdl::queue(bgdlTitle, url, error);
+        std::string msg = id >= 0 ? fmt::format("Sent to system downloads (#{})", id) : error;
+        brls::Logger::info("Download {} via bgdl: {}", itemId, msg);
+        brls::sync([this, itemId, msg]() {
+            {
+                std::lock_guard<std::mutex> lock(this->mutex);
+                for (auto& item : this->items) {
+                    if (item.itemId == itemId) {
+                        // not tracked in-app yet: show the outcome as a message
+                        item.status = DownloadStatus::Failed;
+                        item.errorMessage = msg;
+                        break;
+                    }
+                }
+                this->cancels.erase(itemId);
+                this->saveIndex();
+            }
+            brls::Application::notify(msg);
+            this->statusEvent.fire(itemId, DownloadStatus::Failed);
+            this->processQueue();
+        });
+        return;
+    }
+#endif
     std::string itemDir = this->downloadDir() + "/" + itemId;
 
     ThreadPool::instance().submit([this, itemId, imagePrimaryTag, quality, url, itemDir, etag, cancel](HTTP&) {
