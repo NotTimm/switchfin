@@ -362,8 +362,18 @@ void DownloadManager::doDownload(const std::string& itemId) {
             variants = {{"transcode stream.mp4", mp4}, {"transcode stream", url}};
         }
         std::string title = bgdlTitle;
-        ThreadPool::instance().submit([this, itemId, title, variants](HTTP&) {
-            std::string msg = VitaBgdl::experiment(title, variants);
+        std::string realUrl = fmt::format("{}/Videos/{}/stream?static=true&{}&{}", server, itemId, source, token);
+        std::string thumb = this->downloadDir() + "/" + itemId + "/thumb.png";
+        if (!fs::exists(thumb)) {
+            std::error_code ec;
+            for (auto& e : fs::directory_iterator(this->downloadDir(), ec))
+                if (fs::exists(e.path() / "thumb.png")) {
+                    thumb = (e.path() / "thumb.png").string();
+                    break;
+                }
+        }
+        ThreadPool::instance().submit([this, itemId, title, realUrl, thumb](HTTP&) {
+            std::string msg = VitaBgdl::matrix(title, realUrl, thumb);
             brls::sync([this, itemId, msg]() {
                 {
                     std::lock_guard<std::mutex> lock(this->mutex);

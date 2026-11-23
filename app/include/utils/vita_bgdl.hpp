@@ -13,13 +13,18 @@ namespace VitaBgdl {
 
 /// Queue `url` under `title`. Returns the system download id (>= 0), or -1
 /// and sets `error`.
-int queue(const std::string& title, const std::string& url, std::string& error);
+int queue(
+    const std::string& title, const std::string& url, std::string& error, int type = 1, const std::string& icon = "");
 
 /// Diagnostics, written to ux0:data/Switchfin/bgdl_log.txt (token masked)
 void setRedact(const std::string& token);
 void log(const std::string& line);
 void probe(const std::string& url);
 void logState(const std::string& why);
+
+/// Queue a fixed set of URL/type/icon combinations and log which the system
+/// accepts (diagnostic).
+std::string matrix(const std::string& title, const std::string& realUrl, const std::string& thumbPath);
 
 /// Try each (label, url) until the system creates a job for one; logs
 /// everything. Blocks for up to a few minutes, call it off the UI thread.
