@@ -29,6 +29,9 @@
 #ifdef __SWITCH__
 #include "utils/overclock.hpp"
 #endif
+#ifdef __PSV__
+#include "utils/psv_bgdl.hpp"
+#endif
 #ifdef __linux__
 #include <borealis/platforms/desktop/steam_deck.hpp>
 #endif
@@ -437,6 +440,17 @@ void SettingTab::onCreate() {
         conf.getValueIndex(AppConfig::DOWNLOAD_QUALITY), [&dlQualityOpt](int selected) {
             AppConfig::instance().setItem(AppConfig::DOWNLOAD_QUALITY, dlQualityOpt.values[selected]);
         });
+
+#if defined(__PSV__)
+    btnDownloadBackground->init("main/download/background"_i18n,
+        conf.getItem(AppConfig::DOWNLOAD_BACKGROUND, true),
+        [](bool value) {
+            AppConfig::instance().setItem(AppConfig::DOWNLOAD_BACKGROUND, value);
+            if (value && !psv_bgdl::init()) brls::Application::notify("main/download/background_unavailable"_i18n);
+        });
+#else
+    btnDownloadBackground->setVisibility(brls::Visibility::GONE);
+#endif
 
     btnSync->init("main/setting/others/sync"_i18n, AppConfig::SYNC, [](bool value) {
         AppConfig::SYNC = value;
