@@ -108,6 +108,7 @@ public:
 
         DOWNLOAD_QUALITY,
         DOWNLOAD_PATH,
+        DOWNLOAD_BGDL,  // PSV: system background downloads (experimental)
 
         KEY_REFRESH,        // 刷新快捷键
         KEY_LAST,           // 上一个Tab快捷键
