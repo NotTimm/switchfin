@@ -22,12 +22,19 @@
 
 #include <borealis/core/logger.hpp>
 #include <fmt/format.h>
+#include <curl/curl.h>
+#include <psp2/io/dirent.h>
+#include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
+#include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/modulemgr.h>
 #include <taihen.h>
 
 #include <cstdint>
 #include <cstring>
+#include <ctime>
+#include <fstream>
+#include <set>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -183,6 +190,162 @@ scedownload_class* getService(std::string& error) {
 
 namespace VitaBgdl {
 
+static std::string redactToken;
+static std::mutex logMutex;
+
+void setRedact(const std::string& token) { redactToken = token; }
+
+void log(const std::string& line) {
+    std::string out = line;
+    if (!redactToken.empty())
+        for (size_t p; (p = out.find(redactToken)) != std::string::npos;) out.replace(p, redactToken.size(), "***");
+    std::lock_guard<std::mutex> lock(logMutex);
+    std::ofstream f("ux0:data/Switchfin/bgdl_log.txt", std::ios::app);
+    char ts[32];
+    std::time_t now = std::time(nullptr);
+    std::strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", std::gmtime(&now));
+    f << ts << " " << out << "\n";
+    brls::Logger::info("VitaBgdl: {}", out);
+}
+
+static std::string hexdump(const uint8_t* data, size_t len) {
+    std::string out;
+    for (size_t i = 0; i < len; i += 16) {
+        std::string hex, txt;
+        for (size_t j = i; j < i + 16 && j < len; j++) {
+            hex += fmt::format("{:02x} ", data[j]);
+            txt += (data[j] >= 0x20 && data[j] < 0x7f) ? (char)data[j] : '.';
+        }
+        out += fmt::format("\n    {:04x}: {:<48} {}", i, hex, txt);
+    }
+    return out;
+}
+
+static bool allZero(const uint8_t* d, size_t n) {
+    for (size_t i = 0; i < n; i++)
+        if (d[i]) return false;
+    return true;
+}
+
+static size_t headerCb(char* buf, size_t size, size_t n, void* user) {
+    auto* out = static_cast<std::string*>(user);
+    std::string line(buf, size * n);
+    std::string lower = line;
+    for (auto& c : lower) c = std::tolower((unsigned char)c);
+    if (lower.rfind("http/", 0) == 0 || lower.rfind("content-", 0) == 0 || lower.rfind("accept-ranges", 0) == 0 ||
+        lower.rfind("allow", 0) == 0 || lower.rfind("location", 0) == 0 || lower.rfind("transfer-encoding", 0) == 0) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+        *out += "\n    " + line;
+    }
+    return size * n;
+}
+
+void probe(const std::string& url) {
+    for (int head = 1; head >= 0; head--) {
+        CURL* c = curl_easy_init();
+        if (!c) return;
+        std::string headers;
+        curl_easy_setopt(c, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
+        curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+        curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
+        curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, headerCb);
+        curl_easy_setopt(c, CURLOPT_HEADERDATA, &headers);
+        if (head) {
+            curl_easy_setopt(c, CURLOPT_NOBODY, 1L);
+        } else {
+            // first byte only, to compare with HEAD
+            curl_easy_setopt(c, CURLOPT_RANGE, "0-0");
+            curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, +[](char*, size_t s, size_t n, void*) { return s * n; });
+        }
+        CURLcode rc = curl_easy_perform(c);
+        long code = 0;
+        curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+        log(fmt::format("  probe {}: curl={} ({}) http={}{}", head ? "HEAD" : "GET range 0-0", (int)rc,
+            curl_easy_strerror(rc), code, headers));
+        curl_easy_cleanup(c);
+    }
+}
+
+static std::set<std::string> listDir(const std::string& dir) {
+    std::set<std::string> out;
+    SceUID d = sceIoDopen(dir.c_str());
+    if (d < 0) return out;
+    SceIoDirent e;
+    while (sceIoDread(d, &e) > 0) out.insert(e.d_name);
+    sceIoDclose(d);
+    return out;
+}
+
+static void logJob(const std::string& name) {
+    std::string dir = "ux0:bgdl/t/" + name;
+    log("  job " + dir + ":");
+    for (auto& f : listDir(dir)) {
+        SceIoStat st;
+        std::memset(&st, 0, sizeof(st));
+        sceIoGetstat((dir + "/" + f).c_str(), &st);
+        log(fmt::format("    {} ({} bytes)", f, (long long)st.st_size));
+    }
+    SceUID fd = sceIoOpen((dir + "/d0.pdb").c_str(), SCE_O_RDONLY, 0);
+    if (fd >= 0) {
+        std::vector<uint8_t> buf(0x400);
+        int n = sceIoRead(fd, buf.data(), buf.size());
+        sceIoClose(fd);
+        if (n > 0) log("    d0.pdb:" + hexdump(buf.data(), n));
+    }
+}
+
+void logState(const std::string& why) {
+    log("=== state (" + why + ")");
+    auto jobs = listDir("ux0:bgdl/t");
+    log(fmt::format("  ux0:bgdl/t: {} job(s)", jobs.size()));
+    for (auto& j : jobs) logJob(j);
+    std::string videos;
+    for (auto& v : listDir("ux0:video")) videos += " [" + v + "]";
+    log("  ux0:video:" + (videos.empty() ? std::string(" (empty)") : videos));
+}
+
+std::string experiment(const std::string& title, const std::vector<std::pair<std::string, std::string>>& variants) {
+    log("##### bgdl experiment: " + title);
+    logState("before");
+    for (auto& [label, url] : variants) {
+        log("--- variant " + label + ": " + url);
+        probe(url);
+        auto before = listDir("ux0:bgdl/t");
+        std::string error;
+        int id = queue(title, url, error);
+        if (id < 0) {
+            log("  queue error: " + error);
+            continue;
+        }
+        std::string job;
+        for (int i = 0; i < 20 && job.empty(); i++) {
+            sceKernelDelayThread(500 * 1000);
+            for (auto& d : listDir("ux0:bgdl/t"))
+                if (!before.count(d)) job = d;
+        }
+        if (job.empty()) {
+            log("  no job folder appeared within 10s -> dropped");
+            continue;
+        }
+        log("  job folder appeared: " + job);
+        for (int i = 0; i < 12; i++) {
+            logJob(job);
+            sceKernelDelayThread(10 * 1000 * 1000);
+            if (!listDir("ux0:bgdl/t").count(job)) {
+                log("  job folder gone (finished, exported or cancelled)");
+                break;
+            }
+        }
+        logState("after " + label);
+        return fmt::format("bgdl test: {} accepted (job {}), see bgdl_log.txt", label, job);
+    }
+    logState("end, nothing accepted");
+    return "bgdl test: no variant accepted, see bgdl_log.txt";
+}
+
 int queue(const std::string& title, const std::string& url, std::string& error) {
     if (url.size() >= sizeof(ipmi_download_param::url)) {
         error = "URL too long for system download";
@@ -191,7 +354,10 @@ int queue(const std::string& title, const std::string& url, std::string& error) 
     sceIoMkdir("ux0:bgdl", 0777);
 
     scedownload_class* svc = getService(error);
-    if (!svc) return -1;
+    if (!svc) {
+        log("  service init failed: " + error);
+        return -1;
+    }
 
     int32_t result = 0;
     int32_t bgdlid = 1;  // as in pkgj; the service overwrites it
@@ -219,6 +385,9 @@ int queue(const std::string& title, const std::string& url, std::string& error) 
     dc0->type[0] = dc0->type[1] = BGDL_TYPE_GENERIC;
 
     int res = svc->change_state(svc->class_header->func_table, 0x12340012, params.init.ptr_to_dc0_ptr, 1, params);
+    log(fmt::format("  change_state(queue): res={:#010x} result={:#010x} id={} dc0ptr={}", (uint32_t)res,
+        (uint32_t)result, bgdlid, (void*)params.init.addr_DC0));
+    if (!allZero(buf_2e0.data(), buf_2e0.size())) log("  2E0 reply:" + hexdump(buf_2e0.data(), buf_2e0.size()));
     if (res < 0 || result < 0 || bgdlid < 0) {
         error = fmt::format(
             "SceDownload queue failed: res={:#010x} result={:#010x} id={}", (uint32_t)res, (uint32_t)result, bgdlid);
@@ -232,6 +401,7 @@ int queue(const std::string& title, const std::string& url, std::string& error) 
     params.state.unk_4 = 1;
     params.state.unk_7 = 0x00000A0A;
     res = svc->change_state(svc->class_header->func_table, 0x12340007, nullptr, 0, params);
+    log(fmt::format("  change_state(start): res={:#010x} result={:#010x}", (uint32_t)res, (uint32_t)result));
     if (res < 0 || result < 0) {
         error = fmt::format("SceDownload start failed: res={:#010x} result={:#010x}", (uint32_t)res, (uint32_t)result);
         return -1;

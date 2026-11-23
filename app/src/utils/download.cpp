@@ -36,11 +36,19 @@ std::string DownloadManager::downloadDir() const { return AppConfig::instance().
 void DownloadManager::init() {
     this->loadIndex();
 
-    std::lock_guard<std::mutex> lock(this->mutex);
-    for (auto& item : this->items) {
-        if (item.status == DownloadStatus::Downloading) item.status = DownloadStatus::Queued;
+    {
+        std::lock_guard<std::mutex> lock(this->mutex);
+        for (auto& item : this->items) {
+            if (item.status == DownloadStatus::Downloading) item.status = DownloadStatus::Queued;
+        }
+        this->saveIndex();
     }
-    this->saveIndex();
+#ifdef __PSV__
+    if (AppConfig::instance().getItem(AppConfig::DOWNLOAD_BGDL, false)) {
+        VitaBgdl::setRedact(AppConfig::instance().getToken());
+        ThreadPool::instance().submit([](HTTP&) { VitaBgdl::logState("app startup"); });
+    }
+#endif
 }
 
 void DownloadManager::loadIndex() {
@@ -304,7 +312,7 @@ void DownloadManager::doDownload(const std::string& itemId) {
     std::string etag;
     HTTP::Cancel cancel;
 #ifdef __PSV__
-    std::string bgdlTitle;
+    std::string bgdlTitle, bgdlSourceId;
 #endif
     {
         std::lock_guard<std::mutex> lock(this->mutex);
@@ -321,33 +329,53 @@ void DownloadManager::doDownload(const std::string& itemId) {
         cancel = c == this->cancels.end() ? std::make_shared<std::atomic_bool>(false) : c->second;
 #ifdef __PSV__
         bgdlTitle = it->seriesName.empty() ? it->name : fmt::format("{} - {}", it->seriesName, it->name);
+        bgdlSourceId = it->mediaSourceId;
 #endif
     }
 #ifdef __PSV__
     // Experimental: hand the download to the system download service, which
     // keeps it running in the background with a status bar notification.
+    // Diagnostic build: tries several URL forms and logs what the system does.
     if (AppConfig::instance().getItem(AppConfig::DOWNLOAD_BGDL, false)) {
-        std::string error;
-        int id = VitaBgdl::queue(bgdlTitle, url, error);
-        std::string msg = id >= 0 ? fmt::format("Sent to system downloads (#{})", id) : error;
-        brls::Logger::info("Download {} via bgdl: {}", itemId, msg);
-        brls::sync([this, itemId, msg]() {
-            {
-                std::lock_guard<std::mutex> lock(this->mutex);
-                for (auto& item : this->items) {
-                    if (item.itemId == itemId) {
-                        // not tracked in-app yet: show the outcome as a message
-                        item.status = DownloadStatus::Failed;
-                        item.errorMessage = msg;
-                        break;
+        auto& conf = AppConfig::instance();
+        const std::string& server = conf.getUrl();
+        VitaBgdl::setRedact(conf.getToken());
+        std::string token = HTTP::encode_form({{"api_key", conf.getToken()}});
+        std::string source = HTTP::encode_form({{"mediaSourceId", bgdlSourceId.empty() ? itemId : bgdlSourceId}});
+        std::vector<std::pair<std::string, std::string>> variants;
+        if (quality == DownloadQuality::Original) {
+            variants = {
+                {"static stream.mp4", fmt::format("{}/Videos/{}/stream.mp4?static=true&{}&{}", server, itemId, source, token)},
+                {"static stream", fmt::format("{}/Videos/{}/stream?static=true&{}&{}", server, itemId, source, token)},
+                {"Items Download", url},
+            };
+        } else {
+            std::string mp4 = url;
+            auto pos = mp4.find("/stream?");
+            if (pos != std::string::npos) mp4.replace(pos, 8, "/stream.mp4?");
+            variants = {{"transcode stream.mp4", mp4}, {"transcode stream", url}};
+        }
+        std::string title = bgdlTitle;
+        ThreadPool::instance().submit([this, itemId, title, variants](HTTP&) {
+            std::string msg = VitaBgdl::experiment(title, variants);
+            brls::sync([this, itemId, msg]() {
+                {
+                    std::lock_guard<std::mutex> lock(this->mutex);
+                    for (auto& item : this->items) {
+                        if (item.itemId == itemId) {
+                            // not tracked in-app yet: show the outcome as a message
+                            item.status = DownloadStatus::Failed;
+                            item.errorMessage = msg;
+                            break;
+                        }
                     }
+                    this->cancels.erase(itemId);
+                    this->saveIndex();
                 }
-                this->cancels.erase(itemId);
-                this->saveIndex();
-            }
-            brls::Application::notify(msg);
-            this->statusEvent.fire(itemId, DownloadStatus::Failed);
-            this->processQueue();
+                brls::Application::notify(msg);
+                this->statusEvent.fire(itemId, DownloadStatus::Failed);
+                this->processQueue();
+            });
         });
         return;
     }
