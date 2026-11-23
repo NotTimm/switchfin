@@ -315,7 +315,7 @@ std::string experiment(const std::string& title, const std::vector<std::pair<std
         probe(url);
         auto before = listDir("ux0:bgdl/t");
         std::string error;
-        int id = queue(title, url, error);
+        int id = queue(title, url, error, BGDL_TYPE_GENERIC, "");
         if (id < 0) {
             log("  queue error: " + error);
             continue;
@@ -346,7 +346,55 @@ std::string experiment(const std::string& title, const std::vector<std::pair<std
     return "bgdl test: no variant accepted, see bgdl_log.txt";
 }
 
-int queue(const std::string& title, const std::string& url, std::string& error) {
+std::string matrix(const std::string& title, const std::string& realUrl, const std::string& thumbPath) {
+    log("##### bgdl matrix: " + title);
+    logState("before");
+    std::string icon;
+    if (!thumbPath.empty()) {
+        // pkgj always passes an icon path; give the system a real PNG
+        std::ifstream in(thumbPath, std::ios::binary);
+        std::ofstream out("ux0:bgdl/icon0.png", std::ios::binary);
+        if (in && out) {
+            out << in.rdbuf();
+            icon = "ux0:bgdl/icon0.png";
+        }
+        log("  icon from " + thumbPath + (icon.empty() ? " (copy failed)" : " -> ux0:bgdl/icon0.png"));
+    }
+    struct Case {
+        const char* label;
+        std::string url;
+        int type;
+        bool withIcon;
+    };
+    const Case cases[] = {
+        {"A real https, type 1, no icon", realUrl, 1, false},
+        {"B real https, type 1, icon", realUrl, 1, true},
+        {"C http://127.0.0.1/t.mp4, type 1", "http://127.0.0.1/t.mp4", 1, false},
+        {"D https://127.0.0.1/t.mp4, type 1", "https://127.0.0.1/t.mp4", 1, false},
+        {"E http://127.0.0.1:6969/t.mp4, type 1", "http://127.0.0.1:6969/t.mp4", 1, false},
+        {"F http://127.0.0.1/t.mp4, type 1, icon", "http://127.0.0.1/t.mp4", 1, true},
+        {"G http://127.0.0.1/t.pkg, type 0x16, icon", "http://127.0.0.1/t.pkg", 0x16, true},
+    };
+    std::string summary;
+    for (auto& c : cases) {
+        log(std::string("--- case ") + c.label);
+        auto before = listDir("ux0:bgdl/t");
+        std::string error;
+        int id = queue(title, c.url, error, c.type, c.withIcon ? icon : "");
+        sceKernelDelayThread(3 * 1000 * 1000);
+        std::string job;
+        for (auto& d : listDir("ux0:bgdl/t"))
+            if (!before.count(d)) job = d;
+        std::string verdict = id >= 0 ? (job.empty() ? "accepted, no folder" : "ACCEPTED job " + job) : "rejected";
+        log("  => " + verdict + (error.empty() ? "" : " (" + error + ")"));
+        if (!job.empty()) logJob(job);
+        summary += std::string(1, c.label[0]) + (id >= 0 ? (job.empty() ? "a" : "+") : "-");
+    }
+    logState("end");
+    return "bgdl matrix: " + summary + " (+ job, a accepted, - rejected)";
+}
+
+int queue(const std::string& title, const std::string& url, std::string& error, int type, const std::string& icon) {
     if (url.size() >= sizeof(ipmi_download_param::url)) {
         error = "URL too long for system download";
         return -1;
@@ -382,12 +430,18 @@ int queue(const std::string& title, const std::string& url, std::string& error) 
     auto* dc0 = params.init.addr_DC0;
     std::strncpy(dc0->url, url.c_str(), sizeof(dc0->url) - 1);
     std::strncpy(dc0->title, title.c_str(), sizeof(dc0->title) - 1);
-    dc0->type[0] = dc0->type[1] = BGDL_TYPE_GENERIC;
+    dc0->type[0] = dc0->type[1] = type;
+    if (!icon.empty()) std::strncpy(dc0->icon_path, icon.c_str(), sizeof(dc0->icon_path) - 1);
 
     int res = svc->change_state(svc->class_header->func_table, 0x12340012, params.init.ptr_to_dc0_ptr, 1, params);
     log(fmt::format("  change_state(queue): res={:#010x} result={:#010x} id={} dc0ptr={}", (uint32_t)res,
         (uint32_t)result, bgdlid, (void*)params.init.addr_DC0));
-    if (!allZero(buf_2e0.data(), buf_2e0.size())) log("  2E0 reply:" + hexdump(buf_2e0.data(), buf_2e0.size()));
+    if (!allZero(buf_2e0.data(), 0x40)) log("  2E0 reply:" + hexdump(buf_2e0.data(), 0x40));
+    if (reinterpret_cast<intptr_t>(params.init.addr_DC0) < 0) {
+        error = fmt::format("SceDownload rejected the request: {:#010x}", (uint32_t)(uintptr_t)params.init.addr_DC0);
+        log("  " + error);
+        return -1;
+    }
     if (res < 0 || result < 0 || bgdlid < 0) {
         error = fmt::format(
             "SceDownload queue failed: res={:#010x} result={:#010x} id={}", (uint32_t)res, (uint32_t)result, bgdlid);
