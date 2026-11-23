@@ -1,4 +1,5 @@
 #include "utils/download.hpp"
+#include <thread>
 #include "utils/config.hpp"
 #include "utils/thread.hpp"
 #include "utils/misc.hpp"
@@ -46,7 +47,12 @@ void DownloadManager::init() {
 #ifdef __PSV__
     if (AppConfig::instance().getItem(AppConfig::DOWNLOAD_BGDL, false)) {
         VitaBgdl::setRedact(AppConfig::instance().getToken());
-        ThreadPool::instance().submit([](HTTP&) { VitaBgdl::logState("app startup"); });
+        // Not via ThreadPool: creating it this early starts curl before the
+        // app is up, and its 20 MB pool allocation fails (crash on launch).
+        std::thread([]() {
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            VitaBgdl::logState("app startup");
+        }).detach();
     }
 #endif
 }
