@@ -123,10 +123,13 @@ std::mutex g_mutex;
 // Diagnostics: mirrors bgdl log lines to BGDL_APP_LOG, since the app's own log
 // only goes to stdout. API keys are masked.
 std::string redact(std::string s) {
-    for (size_t pos = 0; (pos = s.find("api_key=", pos)) != std::string::npos;) {
-        pos += 8;
-        size_t end = s.find('&', pos);
-        s.replace(pos, end == std::string::npos ? std::string::npos : end - pos, "***");
+    for (const char* key : {"api_key=", "ApiKey="}) {
+        size_t klen = strlen(key);
+        for (size_t pos = 0; (pos = s.find(key, pos)) != std::string::npos;) {
+            pos += klen;
+            size_t end = s.find('&', pos);
+            s.replace(pos, end == std::string::npos ? std::string::npos : end - pos, "***");
+        }
     }
     return s;
 }

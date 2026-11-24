@@ -270,7 +270,9 @@ std::string DownloadManager::buildDownloadUrl(const DownloadItem& item) const {
     const std::string& token = conf.getToken();
 
     if (item.quality == DownloadQuality::Original) {
-        std::string query = HTTP::encode_form({{"api_key", token}});
+        // Newer servers answer 401 to "api_key" on this route; the system
+        // downloader can't send an auth header, so pass both spellings.
+        std::string query = HTTP::encode_form({{"ApiKey", token}, {"api_key", token}});
         return server + fmt::format(fmt::runtime(jellyfin::apiDownload), item.itemId, query);
     }
 
@@ -294,6 +296,7 @@ std::string DownloadManager::buildDownloadUrl(const DownloadItem& item) const {
                 {"audioCodec", "aac"},
                 {"maxStreamingBitrate", p.bitrate},
                 {"maxHeight", p.height},
+                {"ApiKey", token},
                 {"api_key", token},
             });
             return server + fmt::format(fmt::runtime(jellyfin::apiStream), item.itemId, query);
