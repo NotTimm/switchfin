@@ -20,8 +20,10 @@
 #include <taihen.h>
 
 #include <borealis/core/logger.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -117,6 +119,30 @@ using IpmiGetSizeFn = int (*)(const char* name, int unk);
 using IpmiInitFn = int (*)(uint32_t*** func_table, const char* name, ClassHeader* header, uint32_t* buf_1000);
 
 std::mutex g_mutex;
+
+// Diagnostics: mirrors bgdl log lines to BGDL_APP_LOG, since the app's own log
+// only goes to stdout. API keys are masked.
+std::string redact(std::string s) {
+    for (size_t pos = 0; (pos = s.find("api_key=", pos)) != std::string::npos;) {
+        pos += 8;
+        size_t end = s.find('&', pos);
+        s.replace(pos, end == std::string::npos ? std::string::npos : end - pos, "***");
+    }
+    return s;
+}
+
+template <typename... Args>
+void blog(fmt::format_string<Args...> f, Args&&... args) {
+    std::string line = redact(fmt::format(f, std::forward<Args>(args)...));
+    brls::Logger::info("bgdl: {}", line);
+    FILE* fp = fopen(BGDL_APP_LOG, "a");
+    if (!fp) return;
+    char ts[32];
+    time_t now = time(nullptr);
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    fprintf(fp, "%s %s\n", ts, line.c_str());
+    fclose(fp);
+}
 bool g_connected = false;
 bool g_plugin = false;
 std::string g_icon;
@@ -154,7 +180,7 @@ bool pluginActive(SceUID shell) {
 bool loadPlugin() {
     SceUID shell = shellPid();
     if (shell < 0) {
-        brls::Logger::warning("bgdl: SceShell not found");
+        blog("SceShell not found");
         return false;
     }
     std::string path = "ux0:app/" + titleId() + "/module/" BGDL_PLUGIN_FILE;
@@ -162,7 +188,7 @@ bool loadPlugin() {
     // A copy that is already running answers with NO_RESIDENT after refreshing
     // the pid file, so check the file rather than the return value.
     bool active = pluginActive(shell);
-    brls::Logger::info("bgdl: load {} -> {:#x}, active={}", path, static_cast<uint32_t>(res), active);
+    blog("load {} -> {:#x}, active={}", path, static_cast<uint32_t>(res), active);
     return active;
 }
 
@@ -173,7 +199,7 @@ bool connect() {
     IpmiInitFn ipmi_init = nullptr;
     if (taiGetModuleExportFunc("SceShellSvc", 0xF4E34EDB, 0x4E255C31, reinterpret_cast<uintptr_t*>(&get_size)) < 0 ||
         taiGetModuleExportFunc("SceShellSvc", 0xF4E34EDB, 0xB282B430, reinterpret_cast<uintptr_t*>(&ipmi_init)) < 0) {
-        brls::Logger::warning("bgdl: SceShellSvc exports not found");
+        blog("SceShellSvc exports not found");
         return false;
     }
 
@@ -191,7 +217,7 @@ bool connect() {
 
     int size = get_size(g_init.name, 0x1E00);
     if (size != 0xC4) {
-        brls::Logger::warning("bgdl: IPMI size {:#x}", static_cast<uint32_t>(size));
+        blog("IPMI size {:#x}", static_cast<uint32_t>(size));
         return false;
     }
 
@@ -201,7 +227,7 @@ bool connect() {
 
     int res = ipmi_init(&g_header->func_table, g_init.name, g_header, g_header->buf_1000);
     if (res != 0 || !g_header->func_table) {
-        brls::Logger::warning("bgdl: IPMI init {:#x}", static_cast<uint32_t>(res));
+        blog("IPMI init {:#x}", static_cast<uint32_t>(res));
         return false;
     }
 
@@ -210,7 +236,7 @@ bool connect() {
 
     res = download_init(g_header->func_table, *g_header->func_table, 0x14, &g_init, 2);
     if (res != 0) {
-        brls::Logger::warning("bgdl: SceDownload init {:#x}", static_cast<uint32_t>(res));
+        blog("SceDownload init {:#x}", static_cast<uint32_t>(res));
         return false;
     }
     return true;
@@ -258,8 +284,18 @@ int registerTask(const std::string& title, const std::string& url) {
     p.shell_func_8 = (*g_header->func_table)[8];
 
     int res = g_change_state(g_header->func_table, CMD_REGISTER_TASK, p.init.ptr_to_dc0_ptr, 1, p);
+    // On a rejection the service writes its error code over the DownloadParam
+    // pointer (and into the reply at +4) and sets the id to 0.
+    uint32_t dc0ret = reinterpret_cast<uintptr_t>(p.init.addr_dc0);
+    uint32_t reply[4];
+    memcpy(reply, buf_2e0.data(), sizeof(reply));
+    blog("register: res={:#010x} result={:#010x} id={} dc0ret={:#010x} reply={:08x} {:08x} {:08x} {:08x} url={}",
+        static_cast<uint32_t>(res), static_cast<uint32_t>(result), id, dc0ret, reply[0], reply[1], reply[2], reply[3],
+        url);
     if (res < 0) return res;
     if (result < 0) return result;
+    if (p.init.addr_dc0 != param && (dc0ret & 0x80000000u)) return static_cast<int>(dc0ret);
+    if (static_cast<int32_t>(reply[1]) < 0) return static_cast<int32_t>(reply[1]);
     if (id < 0) return -1;
 
     // Start the downloader's queue.
@@ -269,8 +305,8 @@ int registerTask(const std::string& title, const std::string& url) {
     p.state.unk_4 = 1;
     p.state.unk_7 = 0x0A0A;
     res = g_change_state(g_header->func_table, CMD_START, nullptr, 0, p);
-    if (res < 0) brls::Logger::warning("bgdl: start {:#x}", static_cast<uint32_t>(res));
-    else if (result < 0) brls::Logger::warning("bgdl: start result {:#x}", static_cast<uint32_t>(result));
+    if (res < 0) blog("start {:#x}", static_cast<uint32_t>(res));
+    else if (result < 0) blog("start result {:#x}", static_cast<uint32_t>(result));
 
     return id;
 }
@@ -293,7 +329,7 @@ bool init() {
     if (g_plugin) g_connected = connect();
     if (!g_connected) g_plugin = false;
     g_icon = "ux0:app/" + titleId() + "/sce_sys/icon0.png";
-    brls::Logger::info("bgdl: available={}", g_plugin);
+    blog("init: available={} connected={}", g_plugin, g_connected);
     return g_plugin;
 }
 
@@ -308,22 +344,22 @@ int queue(const std::string& title, const std::string& url, const std::string& d
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_connected || !g_plugin) return -1;
     if (taskCount() >= MAX_TASKS) {
-        brls::Logger::warning("bgdl: the system download queue is full");
+        blog("the system download queue is full");
         return -1;
     }
 
     sceIoRemove(dest.c_str());
     int id = registerTask(title, url);
     if (id < 0) {
-        brls::Logger::error("bgdl: queue failed {:#x}", static_cast<uint32_t>(id));
+        blog("queue failed {:#x}", static_cast<uint32_t>(id));
         return id;
     }
     if (!writeMarker(id, dest)) {
         // Without the marker the plugin leaves the file in the task folder.
-        brls::Logger::error("bgdl: failed to write marker for task {:08x}", static_cast<uint32_t>(id));
+        blog("failed to write marker for task {:08x}", static_cast<uint32_t>(id));
         return -1;
     }
-    brls::Logger::info("bgdl: queued task {:08x} -> {}", static_cast<uint32_t>(id), dest);
+    blog("queued task {:08x} -> {}", static_cast<uint32_t>(id), dest);
     return id;
 }
 

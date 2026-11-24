@@ -14,3 +14,5 @@
 #define BGDL_PLUGIN_FILE "switchfin_bgdl.suprx"
 // The plugin writes the SceShell process id here once its hooks are in place.
 #define BGDL_PID_FILE "ux0:data/switchfin_bgdl.pid"
+#define BGDL_PLUGIN_LOG "ux0:data/switchfin_bgdl_plugin.txt"
+#define BGDL_APP_LOG "ux0:data/Switchfin/bgdl_log.txt"

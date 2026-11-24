@@ -19,6 +19,8 @@
  * Copyright (c) 2020 skgleba).
  */
 
+#include <stdarg.h>
+
 #include <psp2/io/dirent.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
@@ -77,6 +79,22 @@ static int get_shell_offsets(uint32_t nid, ShellOffsets *o) {
     }
 }
 
+// Diagnostics: one line per event in BGDL_PLUGIN_LOG.
+static void plog(const char *fmt, ...) {
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    int len = sceClibVsnprintf(buf, sizeof(buf) - 1, fmt, ap);
+    va_end(ap);
+    if (len < 0) return;
+    if (len > (int)sizeof(buf) - 2) len = sizeof(buf) - 2;
+    buf[len++] = '\n';
+    SceUID fd = sceIoOpen(BGDL_PLUGIN_LOG, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
+    if (fd < 0) return;
+    sceIoWrite(fd, buf, len);
+    sceIoClose(fd);
+}
+
 static int has_suffix(const char *name, const char *suffix) {
     SceSize n = sceClibStrnlen(name, 256);
     SceSize s = sceClibStrnlen(suffix, 16);
@@ -127,17 +145,26 @@ static int export_patched(uint32_t *data) {
     char dst[BGDL_MARKER_MAX];
     char src[320];
 
-    if (read_marker(id, dst, sizeof(dst)) < 0) return TAI_CONTINUE(int, export_ref, data);
+    if (read_marker(id, dst, sizeof(dst)) < 0) {
+        plog("export %08x: no marker, stock export", (unsigned int)id);
+        return TAI_CONTINUE(int, export_ref, data);
+    }
 
     int res = find_payload(id, src, sizeof(src));
-    if (res < 0) return res;
+    if (res < 0) {
+        plog("export %08x: no payload %08x", (unsigned int)id, (unsigned int)res);
+        return res;
+    }
 
     sceIoRemove(dst);
-    return sceIoRename(src, dst);
+    res = sceIoRename(src, dst);
+    plog("export %08x: rename %s -> %s = %08x", (unsigned int)id, src, dst, (unsigned int)res);
+    return res;
 }
 
 static int mime_patched(int unk, int *type, char **filename, char **mime_type) {
     int res = TAI_CONTINUE(int, mime_ref, unk, type, filename, mime_type);
+    plog("mime: res=%08x type=%d", (unsigned int)res, type ? *type : -1);
     if (res == SCE_SHELL_ERROR_UNKNOWN_MIME && type) {
         // Pretend it is a photo so the download is accepted. The stock export
         // then fails, which export_patched handles for Switchfin downloads.
@@ -207,6 +234,9 @@ int module_start(SceSize args, void *argp) {
     hook_ids[1] = taiHookFunctionOffset(&export_ref, info.modid, 0, off.exp, 1, export_patched);
     hook_ids[2] = taiHookFunctionOffset(&mime_ref, info.modid, 0, off.mime, 1, mime_patched);
 
+    plog("start: pid=%08x nid=%08x head=%08x export=%08x mime=%08x", (unsigned int)sceKernelGetProcessId(),
+        (unsigned int)info.module_nid, (unsigned int)hook_ids[0], (unsigned int)hook_ids[1],
+        (unsigned int)hook_ids[2]);
     if (hook_ids[1] < 0 || hook_ids[2] < 0) {
         if (hook_ids[2] >= 0) taiHookRelease(hook_ids[2], mime_ref);
         if (hook_ids[1] >= 0) taiHookRelease(hook_ids[1], export_ref);
