@@ -162,15 +162,21 @@ static int export_patched(uint32_t *data) {
     return res;
 }
 
+// SceShell's file types, as in NetStream's download enabler (GrapheneCt).
+#define SHELL_FILE_TYPE_PHOTO 1
+#define SHELL_FILE_TYPE_VIDEO 3
+
 static int mime_patched(int unk, int *type, char **filename, char **mime_type) {
     int res = TAI_CONTINUE(int, mime_ref, unk, type, filename, mime_type);
-    plog("mime: res=%08x type=%d", (unsigned int)res, type ? *type : -1);
     if (res == SCE_SHELL_ERROR_UNKNOWN_MIME && type) {
-        // Pretend it is a photo so the download is accepted. The stock export
-        // then fails, which export_patched handles for Switchfin downloads.
-        *type = 1;
+        // Accept the download. Videos get the video type, so the tray says
+        // [Video]; export_patched moves Switchfin's files either way.
+        int video = mime_type && *mime_type && sceClibStrncmp(*mime_type, "video/", 6) == 0;
+        *type = video ? SHELL_FILE_TYPE_VIDEO : SHELL_FILE_TYPE_PHOTO;
+        plog("mime: unknown -> type %d (%s)", *type, video ? *mime_type : "other");
         return 0;
     }
+    plog("mime: res=%08x type=%d", (unsigned int)res, type ? *type : -1);
     return res;
 }
 

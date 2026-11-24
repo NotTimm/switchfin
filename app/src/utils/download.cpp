@@ -414,10 +414,21 @@ void DownloadManager::doDownload(const std::string& itemId) {
         HTTP::Header header = {AppConfig::instance().getAuth(AppConfig::instance().getToken())};
 
         jellyfin::Detail detail;
+        // Size of the original file, for background download progress.
+        int64_t sourceSize = 0;
         if (!cancel->load()) {
             try {
                 auto resp = HTTP::get(detailUrl, header, HTTP::Timeout{});
-                if (!resp.empty()) detail = nlohmann::json::parse(resp).get<jellyfin::Detail>();
+                if (!resp.empty()) {
+                    auto json = nlohmann::json::parse(resp);
+                    detail = json.get<jellyfin::Detail>();
+                    auto sources = json.find("MediaSources");
+                    if (sources != json.end() && sources->is_array() && !sources->empty()) {
+                        auto size = sources->front().find("Size");
+                        if (size != sources->front().end() && size->is_number_integer())
+                            sourceSize = size->get<int64_t>();
+                    }
+                }
             } catch (const std::exception& e) {
                 brls::Logger::warning("Failed to fetch item detail for {}: {}", itemId, e.what());
             }
@@ -494,7 +505,9 @@ void DownloadManager::doDownload(const std::string& itemId) {
         if (useBackground && !cancel->load()) {
             int id = psv_bgdl::queue(title, url, itemDir + "/" + fileName);
             if (id >= 0) {
-                brls::sync([this, itemId, itemDir, id, cancel]() {
+                // Transcodes have no known size; their progress shows bytes only.
+                int64_t total = quality == DownloadQuality::Original ? sourceSize : 0;
+                brls::sync([this, itemId, itemDir, id, cancel, total]() {
                     bool removed = false;
                     bool cancelled = false;
                     {
@@ -509,6 +522,7 @@ void DownloadManager::doDownload(const std::string& itemId) {
                                 it->status = DownloadStatus::Cancelled;
                             } else {
                                 it->bgdlId = id;
+                                if (total > 0) it->totalBytes = total;
                             }
                             break;
                         }
