@@ -133,6 +133,8 @@
                 marginBottom="30px">
                 <brls:SelectorCell
                     id="setting/download/quality" />
+                <brls:BooleanCell
+                    id="setting/download/background" />
             </brls:Box>
 
             <brls:Header

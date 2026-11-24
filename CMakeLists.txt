@@ -293,12 +293,21 @@ elseif (PLATFORM_PSV)
     if (USE_VITA_SHARK)
         list(APPEND PSV_ASSETS_FILES "${CMAKE_BINARY_DIR}/vendor/SceShaccCg" module)
     endif ()
+    # SceShell plugin for background downloads (app/src/utils/psv_bgdl.cpp)
+    add_subdirectory(app/platform/vita/bgdl_plugin)
+    list(APPEND PSV_ASSETS_FILES
+        FILE ${CMAKE_BINARY_DIR}/app/platform/vita/bgdl_plugin/switchfin_bgdl.suprx module/switchfin_bgdl.suprx)
     vita_create_self(${PROJECT_NAME}.self ${PROJECT_NAME} UNSAFE NOASLR)
     vita_create_vpk(${PROJECT_NAME}.vpk ${VITA_TITLEID} ${PROJECT_NAME}.self
         VERSION ${VITA_VERSION}
         NAME ${PROJECT_NAME}
         FILE ${PSV_ASSETS_FILES}
     )
+    if (TARGET ${PROJECT_NAME}.vpk-vpk)
+        add_dependencies(${PROJECT_NAME}.vpk-vpk switchfin_bgdl.suprx-self)
+    else ()
+        add_dependencies(${PROJECT_NAME}.vpk switchfin_bgdl.suprx)
+    endif ()
 elseif (PLATFORM_PS4)
     add_self(${PROJECT_NAME})
     add_pkg(${PROJECT_NAME}

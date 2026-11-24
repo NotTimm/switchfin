@@ -65,6 +65,7 @@ private:
     BRLS_BIND(brls::InputCell, inputProxy, "setting/network/proxy");
 
     BRLS_BIND(brls::SelectorCell, selectorDownloadQuality, "setting/download/quality");
+    BRLS_BIND(brls::BooleanCell, btnDownloadBackground, "setting/download/background");
 
     BRLS_BIND(SelectorCell, selectorKeymap, "setting/keymap");
     BRLS_BIND(SelectorCell, selectorLang, "setting/language");

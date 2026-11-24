@@ -133,6 +133,7 @@ std::unordered_map<AppConfig::Item, AppConfig::Option> AppConfig::settingMap = {
 
     {DOWNLOAD_QUALITY, {"download_quality", {"Original", "1080p", "720p", "480p"}, {0, 1, 2, 3}}},
     {DOWNLOAD_PATH, {"download_path"}},
+    {DOWNLOAD_BACKGROUND, {"download_background"}},
 
     {KEY_REFRESH, {"key_refresh"}},
     {KEY_LAST, {"key_last"}},
