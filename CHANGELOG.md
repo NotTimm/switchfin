@@ -4,6 +4,8 @@
 
 ### Added
 
+* player: skip intro/recap/preview/commercial/credits from server media segments (Jellyfin 10.10+, e.g. Intro Skipper), with a per-type Skip / Ask / Do nothing setting
+* player: Up Next card with "Start now" at the credits or the last seconds of an episode
 * favorite: add a "Favorites" tab, grouped by media type
 * movie/series: show original title, tagline, tags, studios, provider links and stream info
 * album: show track count, total duration and genres

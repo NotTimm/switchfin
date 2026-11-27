@@ -3,6 +3,7 @@
 #include "utils/config.hpp"
 #include "view/button_close.hpp"
 #include "view/mpv_core.hpp"
+#include "view/media_segment.hpp"
 #include "view/player_setting.hpp"
 
 using namespace brls::literals;
@@ -141,6 +142,8 @@ PlayerSetting::PlayerSetting(const jellyfin::Source* src) {
             MPVCore::OSD_ON_TOGGLE = value;
             conf.setItem(AppConfig::OSD_ON_TOGGLE, value);
         });
+
+    segment::addSettingCells(segmentBox);
 
     /// Player mirror
     btnVideoMirror->init("main/setting/filter/mirror"_i18n,

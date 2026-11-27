@@ -7,6 +7,7 @@
 #include <borealis.hpp>
 #include <utils/event.hpp>
 #include <api/jellyfin/media.hpp>
+#include <view/media_segment.hpp>
 
 class VideoProgressSlider;
 class SVGImage;
@@ -51,6 +52,13 @@ public:
     void setChapters(const std::vector<jellyfin::MediaChapter>& chaps, uint64_t duration);
 
     void playNext(int offset);
+
+    /// @brief Media segments of the current item, see PlayerView::requestSegments
+    void setSegments(const std::vector<jellyfin::MediaSegment>& list);
+    /// @brief Forget segments and close any prompt, called when the item changes
+    void clearSegments();
+    /// @brief Episode offered by the Up Next card, an empty title means there is none
+    void setUpNext(const std::string& title, const std::string& itemId, const std::string& imageTag);
 
     brls::Event<int>* getPlayEvent() { return &this->playIndexEvent; }
 
@@ -116,8 +124,35 @@ private:
     BRLS_BIND(brls::Label, hintLabel, "video/osd/hint/label");
     BRLS_BIND(brls::Box, hintBox, "video/osd/hint/box");
 
+    BRLS_BIND(brls::Box, segmentBox, "video/segment/box");
+    BRLS_BIND(brls::Label, segmentIcon, "video/segment/icon");
+    BRLS_BIND(brls::Label, segmentLabel, "video/segment/label");
+    BRLS_BIND(brls::Box, upNextBox, "video/upnext/box");
+    BRLS_BIND(brls::Image, upNextImage, "video/upnext/image");
+    BRLS_BIND(brls::Label, upNextTitle, "video/upnext/title");
+    BRLS_BIND(brls::Label, upNextCountdown, "video/upnext/countdown");
+    BRLS_BIND(brls::Box, upNextHide, "video/upnext/hide");
+    BRLS_BIND(brls::Label, upNextHideIcon, "video/upnext/hide/icon");
+    BRLS_BIND(brls::Box, upNextStart, "video/upnext/start");
+    BRLS_BIND(brls::Label, upNextStartIcon, "video/upnext/start/icon");
+
     bool toggleDanmaku();
     void refreshDanmakuIcon();
+
+    /// Media segments
+    void updateSegments();
+    void enterSegment(int index);
+    /// @brief Whether the segment lasts until the end of the item (credits)
+    bool runsToEnd(int index) const;
+    bool skipSegment();
+    bool isSkipPromptShown() const;
+    void updateUpNext(double pos, double duration);
+    void showUpNext();
+    void hideUpNext(bool dismissed);
+    bool startUpNext();
+    /// @brief A/B while a prompt is shown, returns false when nothing was handled
+    bool onPromptConfirm();
+    bool onPromptCancel();
 
     void registerMpvEvent();
     void unRegisterMpvEvent();
@@ -147,6 +182,22 @@ private:
     brls::Event<int> playIndexEvent;
     brls::VoidEvent settingEvent;
     View* lastFocusedView = nullptr;
+
+    // Media segments, positions in seconds
+    struct Segment {
+        segment::Kind kind;
+        double start;
+        double end;
+        bool autoSkipped = false;
+    };
+    std::vector<Segment> segments;
+    int activeSegment = -1;
+    bool skipPromptArmed = false;
+    brls::Time skipPromptUntil = 0;
+    bool hasUpNext = false;
+    bool upNextShown = false;
+    bool upNextDismissed = false;
+    int upNextRemaining = -1;
 
     // OSD
     bool isOsdShown = false;

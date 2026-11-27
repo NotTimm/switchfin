@@ -34,6 +34,10 @@ private:
     NVGcolor savedClearColor = nvgRGBA(0, 0, 0, 0);
 #endif
     void setChapters(const std::vector<jellyfin::MediaChapter>& chaps, uint64_t duration);
+    /// @brief Fetch intro/credits/... markers, see VideoView::setSegments
+    void requestSegments();
+    /// @brief Offer the episode after @p index in the Up Next card
+    void setUpNext(int index);
     /// @brief get video url
     void playMedia(const uint64_t seekTicks);
     bool playIndex(int index);

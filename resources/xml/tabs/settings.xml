@@ -83,6 +83,18 @@
             <brls:Header
                 width="auto"
                 height="auto"
+                title="@i18n/main/setting/segment/header"
+                marginBottom="0px" />
+            <brls:Box
+                width="100%"
+                height="auto"
+                axis="column"
+                marginBottom="30px"
+                id="setting/segment" />
+
+            <brls:Header
+                width="auto"
+                height="auto"
                 title="@i18n/main/setting/transcode/header"
                 marginBottom="0px" />
             <brls:Box

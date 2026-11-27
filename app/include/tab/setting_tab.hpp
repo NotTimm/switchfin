@@ -41,6 +41,7 @@ private:
     BRLS_BIND(brls::BooleanCell, btnLatencyHacks, "setting/video/latency_hacks");
     BRLS_BIND(brls::BooleanCell, btnSubFallback, "setting/video/subs_fallback");
     BRLS_BIND(brls::BooleanCell, btnDirectPlay, "setting/video/directplay");
+    BRLS_BIND(brls::Box, segmentBox, "setting/segment");
     BRLS_BIND(brls::SelectorCell, selectorVO, "setting/mpv/vo");
     BRLS_BIND(brls::SelectorCell, selectorCodec, "setting/transcode/codec");
     BRLS_BIND(brls::SelectorCell, selectorAudioChannels, "setting/playback/audio_channels");

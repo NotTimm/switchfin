@@ -459,4 +459,128 @@
         </brls:Box>
     </brls:Box>
 
+    <!-- Skip intro/credits/... prompt, drawn by VideoView -->
+    <brls:Box
+        id="video/segment/box"
+        width="auto"
+        height="44"
+        axis="row"
+        alignItems="center"
+        positionType="absolute"
+        positionBottom="110"
+        positionRight="40"
+        cornerRadius="8"
+        backgroundColor="#202020E0"
+        visibility="gone">
+        <brls:Label
+            id="video/segment/icon"
+            marginLeft="16"
+            fontSize="22"
+            textColor="@theme/color/white" />
+        <brls:Label
+            id="video/segment/label"
+            marginLeft="10"
+            marginRight="16"
+            singleLine="true"
+            textColor="@theme/color/white" />
+    </brls:Box>
+
+    <!-- Up Next card shown before the end of an episode, drawn by VideoView -->
+    <brls:Box
+        id="video/upnext/box"
+        width="460"
+        height="auto"
+        axis="column"
+        positionType="absolute"
+        positionBottom="110"
+        positionRight="40"
+        padding="14"
+        cornerRadius="8"
+        backgroundColor="#202020E8"
+        visibility="gone">
+        <brls:Box
+            width="100%"
+            height="auto"
+            axis="row"
+            alignItems="center">
+            <brls:Image
+                id="video/upnext/image"
+                width="160"
+                height="90"
+                cornerRadius="4"
+                scalingType="fill" />
+            <brls:Box
+                width="auto"
+                height="auto"
+                grow="1"
+                shrink="1"
+                axis="column"
+                marginLeft="14">
+                <brls:Label
+                    fontSize="16"
+                    textColor="#C0C0C0"
+                    text="@i18n/main/player/up_next" />
+                <brls:Label
+                    id="video/upnext/title"
+                    marginTop="4"
+                    fontSize="18"
+                    singleLine="true"
+                    textColor="@theme/color/white" />
+                <brls:Label
+                    id="video/upnext/countdown"
+                    marginTop="6"
+                    fontSize="16"
+                    textColor="#C0C0C0" />
+            </brls:Box>
+        </brls:Box>
+        <brls:Box
+            width="100%"
+            height="auto"
+            axis="row"
+            justifyContent="flexEnd"
+            marginTop="12">
+            <brls:Box
+                id="video/upnext/hide"
+                width="auto"
+                height="40"
+                axis="row"
+                alignItems="center"
+                cornerRadius="6"
+                backgroundColor="#FFFFFF20">
+                <brls:Label
+                    id="video/upnext/hide/icon"
+                    marginLeft="14"
+                    fontSize="20"
+                    textColor="@theme/color/white" />
+                <brls:Label
+                    marginLeft="8"
+                    marginRight="14"
+                    singleLine="true"
+                    textColor="@theme/color/white"
+                    text="@i18n/main/player/up_next_hide" />
+            </brls:Box>
+            <brls:Box
+                id="video/upnext/start"
+                width="auto"
+                height="40"
+                axis="row"
+                alignItems="center"
+                marginLeft="12"
+                cornerRadius="6"
+                backgroundColor="@theme/color/app">
+                <brls:Label
+                    id="video/upnext/start/icon"
+                    marginLeft="14"
+                    fontSize="20"
+                    textColor="@theme/color/white" />
+                <brls:Label
+                    marginLeft="8"
+                    marginRight="14"
+                    singleLine="true"
+                    textColor="@theme/color/white"
+                    text="@i18n/main/player/up_next_start" />
+            </brls:Box>
+        </brls:Box>
+    </brls:Box>
+
 </brls:Box>

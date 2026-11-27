@@ -49,6 +49,7 @@ constexpr uint32_t MINIMUM_WINDOW_HEIGHT = 360;
 #include "utils/thread.hpp"
 #include "view/mpv_core.hpp"
 #include "view/danmaku_core.hpp"
+#include "view/media_segment.hpp"
 #include <lunasvg.h>
 
 std::unordered_map<AppConfig::Item, AppConfig::Option> AppConfig::settingMap = {
@@ -90,6 +91,12 @@ std::unordered_map<AppConfig::Item, AppConfig::Option> AppConfig::settingMap = {
     {PLAYER_HWDEC_CUSTOM, {"player_hwdec_custom"}},
     {PLAYER_ASPECT, {"player_aspect", {"auto", "stretch", "crop", "4:3", "16:9"}}},
     {PLAYER_TV_MODE, {"player_tv_mode"}},
+    {PLAYER_SEGMENT_INTRO, {"player_segment_intro"}},
+    {PLAYER_SEGMENT_RECAP, {"player_segment_recap"}},
+    {PLAYER_SEGMENT_PREVIEW, {"player_segment_preview"}},
+    {PLAYER_SEGMENT_COMMERCIAL, {"player_segment_commercial"}},
+    {PLAYER_SEGMENT_CREDITS, {"player_segment_credits"}},
+    {PLAYER_UP_NEXT, {"player_up_next"}},
     {PLAYER_LATENCY_HACKS, {"player_latency_hacks"}},
     {DANMAKU, {"danmaku"}},
     {DANMAKU_ON, {"danmaku_on"}},
@@ -373,6 +380,7 @@ bool AppConfig::init() {
     // 初始化视频比例
     MPVCore::VIDEO_ASPECT = this->getItem(PLAYER_ASPECT, MPVCore::VIDEO_ASPECT);
     MPVCore::OSD_TV_MODE = this->getItem(PLAYER_TV_MODE, false);
+    segment::load();
     MPVCore::LATENCY_HACKS = this->getItem(PLAYER_LATENCY_HACKS, MPVCore::LATENCY_HACKS);
 
     // 初始化弹幕相关内容

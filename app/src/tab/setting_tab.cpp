@@ -23,6 +23,7 @@
 #include "utils/thread.hpp"
 #include <curl/curl.h>
 #include "view/mpv_core.hpp"
+#include "view/media_segment.hpp"
 #include "view/selector_cell.hpp"
 #include "api/analytics.hpp"
 #include "api/jellyfin.hpp"
@@ -285,6 +286,8 @@ void SettingTab::onCreate() {
         MPVCore::CLIP_POINT = value;
         conf.setItem(AppConfig::CLIP_POINT, value);
     });
+
+    segment::addSettingCells(segmentBox);
 
 #ifdef __SWITCH__
     btnTutorialOpenApp->registerClickAction([](...) -> bool {

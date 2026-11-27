@@ -2,6 +2,7 @@
 #include "utils/config.hpp"
 #include "utils/dialog.hpp"
 #include "utils/gesture.hpp"
+#include "utils/image.hpp"
 #include "utils/keybind.hpp"
 #include "utils/misc.hpp"
 #include "view/danmaku_core.hpp"
@@ -10,8 +11,15 @@
 #include "view/svg_image.hpp"
 #include "view/video_profile.hpp"
 #include "view/video_progress_slider.hpp"
+#include <borealis/views/hint.hpp>
+#include <cmath>
 
 const int VIDEO_SEEK_NODELAY = 0;
+
+/// How long the skip prompt stays on screen without the OSD (jellyfin-web uses 8 s too)
+const brls::Time SKIP_PROMPT_TIME = 8000000;
+/// A segment ending this close to the end of the item counts as running to the end
+const double SEGMENT_END_SLACK = 5.0;
 
 using namespace brls::literals;
 
@@ -58,6 +66,7 @@ VideoView::VideoView() {
                 this->toggleOSD();
                 return true;
             }
+            if (this->onPromptCancel()) return true;
             if (MPVCore::OSD_TV_MODE && this->isOsdShown) {
                 this->toggleOSD();
                 return true;
@@ -152,6 +161,17 @@ VideoView::VideoView() {
         return true;
     });
     this->btnDanmakuSetting->addGestureRecognizer(new brls::TapGestureRecognizer(this->btnDanmakuSetting));
+
+    /// Skip prompt and Up Next card: A confirms, B hides (see the actions above), or tap them
+    this->segmentIcon->setText(brls::Hint::getKeyIcon(brls::BUTTON_A));
+    this->upNextStartIcon->setText(brls::Hint::getKeyIcon(brls::BUTTON_A));
+    this->upNextHideIcon->setText(brls::Hint::getKeyIcon(brls::BUTTON_B));
+    this->segmentBox->addGestureRecognizer(
+        new brls::TapGestureRecognizer(this->segmentBox, [this]() { this->skipSegment(); }));
+    this->upNextStart->addGestureRecognizer(
+        new brls::TapGestureRecognizer(this->upNextStart, [this]() { this->startUpNext(); }));
+    this->upNextHide->addGestureRecognizer(
+        new brls::TapGestureRecognizer(this->upNextHide, [this]() { this->hideUpNext(true); }));
 
     this->registerMpvEvent();
 
@@ -306,6 +326,7 @@ VideoView::VideoView() {
     this->registerActions(
         "main/player/toggle"_i18n, brls::BUTTON_A, KeyBind::getVideoPause(), [this](brls::View* view) {
             CHECK_OSD(true);
+            if (this->onPromptConfirm()) return true;
             MPVCore::instance().togglePlay();
             if (MPVCore::OSD_ON_TOGGLE) {
                 this->showOSD(true);
@@ -500,6 +521,16 @@ void VideoView::draw(NVGcontext* vg, float x, float y, float w, float h, brls::S
         this->hintLastShowTime = 0;
     }
 
+    // skip prompt / Up Next card
+    if (this->upNextShown) {
+        this->upNextBox->frame(ctx);
+    } else if (this->isSkipPromptShown()) {
+        this->segmentBox->setVisibility(brls::Visibility::VISIBLE);
+        this->segmentBox->frame(ctx);
+    } else {
+        this->segmentBox->setVisibility(brls::Visibility::GONE);
+    }
+
     // hot key
     this->buttonProcessing();
 
@@ -622,6 +653,7 @@ void VideoView::registerMpvEvent() {
                 this->leftStatusLabel->setText(misc::sec2Time(mpv.video_progress));
                 this->osdSlider->setProgress((float)mpv.playback_time / mpv.duration);
             }
+            this->updateSegments();
             break;
         case MpvEventEnum::VIDEO_SPEED_CHANGE:
             if (std::fabs(mpv.video_speed - 1) < 1e-5) {
@@ -634,6 +666,7 @@ void VideoView::registerMpvEvent() {
             // 播放结束
             disableDimming(false);
             this->toggleIcon->setImageFromSVGRes("icon/ico-play.svg");
+            this->clearSegments();
             this->playIndexEvent.fire(++this->playIndex);
             break;
         case MpvEventEnum::CACHE_SPEED_CHANGE:
@@ -904,6 +937,208 @@ void VideoView::setChapters(const std::vector<jellyfin::MediaChapter>& chaps, ui
 }
 
 void VideoView::playNext(int offset) { this->playIndexEvent.fire(this->playIndex + offset); }
+
+/// Media segments
+
+void VideoView::setSegments(const std::vector<jellyfin::MediaSegment>& list) {
+    this->clearSegments();
+    for (auto& s : list) {
+        segment::Kind kind;
+        if (!segment::kindOf(s.Type, kind)) continue;
+        double start = double(s.StartTicks) / jellyfin::PLAYTICKS;
+        // no (or a broken) end: the segment lasts until the end of the item
+        double end = s.EndTicks > s.StartTicks ? double(s.EndTicks) / jellyfin::PLAYTICKS : INFINITY;
+        // too short to be worth a seek on a transcoded stream
+        if (end - start < 1.0) continue;
+        this->segments.push_back({kind, start, end});
+    }
+    brls::Logger::info("VideoView: {} media segments", this->segments.size());
+    this->updateSegments();
+}
+
+void VideoView::clearSegments() {
+    this->segments.clear();
+    this->activeSegment = -1;
+    this->skipPromptArmed = false;
+    this->skipPromptUntil = 0;
+    this->segmentBox->setVisibility(brls::Visibility::GONE);
+    this->hideUpNext(false);
+    this->upNextDismissed = false;
+}
+
+void VideoView::setUpNext(const std::string& title, const std::string& itemId, const std::string& imageTag) {
+    this->hideUpNext(false);
+    this->upNextDismissed = false;
+    this->hasUpNext = !title.empty();
+    if (!this->hasUpNext) return;
+
+    this->upNextTitle->setText(title);
+    Image::cancel(this->upNextImage);
+    this->upNextImage->clear();
+    if (!imageTag.empty()) {
+        Image::load(this->upNextImage, 160, jellyfin::apiPrimaryImage, itemId, HTTP::encode_form({{"tag", imageTag}}));
+    }
+}
+
+bool VideoView::runsToEnd(int index) const {
+    auto& mpv = MPVCore::instance();
+    return mpv.duration > 0 && this->segments[index].end >= mpv.duration - SEGMENT_END_SLACK;
+}
+
+void VideoView::updateSegments() {
+    auto& mpv = MPVCore::instance();
+    // wait for the file: "runs to the end" needs the duration
+    if (mpv.duration <= 0) return;
+    double pos = mpv.playback_time;
+
+    int index = -1;
+    for (size_t i = 0; i < this->segments.size(); i++) {
+        if (pos >= this->segments[i].start && pos < this->segments[i].end) {
+            index = i;
+            break;
+        }
+    }
+    if (index != this->activeSegment) {
+        this->activeSegment = index;
+        this->skipPromptArmed = false;
+        if (index >= 0) this->enterSegment(index);
+    }
+    this->updateUpNext(pos, mpv.duration);
+}
+
+void VideoView::enterSegment(int index) {
+    Segment& seg = this->segments[index];
+    segment::Action action = segment::action(seg.kind);
+    if (action == segment::Action::NONE) return;
+
+    if (seg.kind == segment::Kind::CREDITS && this->runsToEnd(index)) {
+        if (this->hasUpNext) {
+            // like the Jellyfin apps: credits at the end lead to the next episode
+            if (action == segment::Action::SKIP) {
+                brls::Logger::info("VideoView: credits, play next");
+                this->playNext(1);
+                return;
+            }
+            // the Up Next card stands in for the skip prompt
+            if (segment::UP_NEXT) return;
+        } else if (action == segment::Action::SKIP) {
+            // last item: skipping would just close the player
+            return;
+        }
+    }
+
+    if (action == segment::Action::SKIP) {
+        // only once, seeking back into the segment lets it play
+        if (seg.autoSkipped) return;
+        seg.autoSkipped = true;
+        this->skipSegment();
+        return;
+    }
+
+    this->segmentLabel->setText(segment::skipLabel(seg.kind));
+    this->skipPromptArmed = true;
+    this->skipPromptUntil = brls::getCPUTimeUsec() + SKIP_PROMPT_TIME;
+}
+
+bool VideoView::isSkipPromptShown() const {
+    if (!this->skipPromptArmed || this->activeSegment < 0) return false;
+    // stays reachable while the OSD is shown, like jellyfin-web
+    return this->isOsdShown || brls::getCPUTimeUsec() < this->skipPromptUntil;
+}
+
+bool VideoView::skipSegment() {
+    if (this->activeSegment < 0) return false;
+    int index = this->activeSegment;
+    const Segment& seg = this->segments[index];
+    this->skipPromptArmed = false;
+
+    if (this->runsToEnd(index) && this->hasUpNext) {
+        this->playNext(1);
+        return true;
+    }
+
+    auto& mpv = MPVCore::instance();
+    double target = std::isinf(seg.end) ? mpv.duration : seg.end;
+    brls::Logger::info("VideoView: skip segment {} -> {}", seg.start, target);
+    this->showHint(segment::skipLabel(seg.kind));
+    mpv.seek(target);
+    return true;
+}
+
+void VideoView::updateUpNext(double pos, double duration) {
+    if (!this->hasUpNext || !segment::UP_NEXT || duration <= 0) {
+        if (this->upNextShown) this->hideUpNext(false);
+        return;
+    }
+
+    // credits running to the end start the card, otherwise the last 30-40 s
+    double at = INFINITY;
+    for (size_t i = 0; i < this->segments.size(); i++) {
+        auto& seg = this->segments[i];
+        if (seg.kind == segment::Kind::CREDITS && this->runsToEnd(i) &&
+            segment::action(seg.kind) != segment::Action::SKIP) {
+            at = seg.start;
+            break;
+        }
+    }
+    if (std::isinf(at) && duration >= 600) {
+        at = duration - (duration >= 3000 ? 40 : duration >= 2400 ? 35 : 30);
+    }
+
+    if (pos < at) {
+        // seeked back before the card: offer it again next time
+        if (this->upNextShown) this->hideUpNext(false);
+        this->upNextDismissed = false;
+        return;
+    }
+    if (this->upNextDismissed) return;
+    if (!this->upNextShown) this->showUpNext();
+
+    int remaining = std::max(0, int(std::ceil(duration - pos)));
+    if (remaining != this->upNextRemaining) {
+        this->upNextRemaining = remaining;
+        this->upNextCountdown->setText(fmt::format(fmt::runtime("main/player/up_next_countdown"_i18n), remaining));
+    }
+}
+
+void VideoView::showUpNext() {
+    this->upNextShown = true;
+    this->upNextRemaining = -1;
+    this->skipPromptArmed = false;
+    this->segmentBox->setVisibility(brls::Visibility::GONE);
+    this->upNextBox->setVisibility(brls::Visibility::VISIBLE);
+}
+
+void VideoView::hideUpNext(bool dismissed) {
+    if (dismissed) this->upNextDismissed = true;
+    this->upNextShown = false;
+    this->upNextBox->setVisibility(brls::Visibility::GONE);
+}
+
+bool VideoView::startUpNext() {
+    if (!this->upNextShown) return false;
+    this->hideUpNext(false);
+    this->playNext(1);
+    return true;
+}
+
+bool VideoView::onPromptConfirm() {
+    if (this->upNextShown) return this->startUpNext();
+    if (this->isSkipPromptShown()) return this->skipSegment();
+    return false;
+}
+
+bool VideoView::onPromptCancel() {
+    if (this->upNextShown) {
+        this->hideUpNext(true);
+        return true;
+    }
+    if (this->isSkipPromptShown()) {
+        this->skipPromptArmed = false;
+        return true;
+    }
+    return false;
+}
 
 void VideoView::hideVideoProgressSlider() { this->osdSlider->setVisibility(brls::Visibility::GONE); }
 

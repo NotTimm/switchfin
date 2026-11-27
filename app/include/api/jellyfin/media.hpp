@@ -17,6 +17,8 @@ const std::string_view apiShowEpisodes = "/Shows/{}/Episodes?{}";
 const std::string_view apiSimilar = "/Items/{}/Similar?{}";
 const std::string_view apiLiveChannels = "/LiveTv/Channels?{}";
 const std::string_view apiProgramRecommend = "/LiveTv/Programs/Recommended?{}";
+// Intro/credits/... markers from a segment provider such as Intro Skipper (Jellyfin 10.10+)
+const std::string_view apiMediaSegments = "/MediaSegments/{}";
 const std::string_view apiGenres = "/Genres?{}";
 const std::string_view apiArtists = "/Artists?{}";
 const std::string_view apiMovieRecommend = "/Movies/Recommendations?{}";
@@ -97,6 +99,15 @@ struct MediaChapter {
     uint64_t StartPositionTicks = 0;
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(MediaChapter, Name, StartPositionTicks);
+
+// MediaSegmentDto. Type is kept as a string: servers before 10.11 call credits "Outro".
+struct MediaSegment {
+    std::string Id;
+    std::string Type;
+    uint64_t StartTicks = 0;
+    uint64_t EndTicks = 0;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(MediaSegment, Id, Type, StartTicks, EndTicks);
 
 struct Genres {
     std::string Id;

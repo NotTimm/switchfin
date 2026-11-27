@@ -53,7 +53,16 @@
     "next": "Next",
     "error": "Playback error",
     "episode": "Episode",
-    "speed_up": "Current speed {}"
+    "speed_up": "Current speed {}",
+    "skip_intro": "Skip Intro",
+    "skip_recap": "Skip Recap",
+    "skip_preview": "Skip Preview",
+    "skip_commercial": "Skip Commercial",
+    "skip_credits": "Skip Credits",
+    "up_next": "Up Next",
+    "up_next_start": "Start now",
+    "up_next_hide": "Hide",
+    "up_next_countdown": "Starting in {} s"
   },
   "ebook": {
     "zoom": "Zoom",
@@ -323,6 +332,18 @@
       "upgrade": "{} is available now! Ready to update?",
       "updating": "Updating in progress, cancel now?",
       "release": "Check for updates"
+    },
+    "segment": {
+      "header": "Media segments",
+      "intro": "Intro",
+      "recap": "Recap",
+      "preview": "Preview",
+      "commercial": "Commercial",
+      "credits": "Credits",
+      "none": "Do nothing",
+      "ask": "Ask to skip",
+      "skip": "Skip",
+      "up_next": "Show Up Next before the end of an episode"
     }
   },
   "hints": {

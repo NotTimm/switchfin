@@ -96,6 +96,7 @@ PlayerView::PlayerView(const jellyfin::Item& item, const uint64_t seekTicks, con
     }
 
     this->setChapters(item.Chapters, item.RunTimeTicks);
+    if (item.Type != jellyfin::mediaTypeTvChannel) this->requestSegments();
     this->playMedia(seekTicks > 0 ? seekTicks : item.UserData.PlaybackPositionTicks);
 
     // Report stop when application exit
@@ -146,12 +147,50 @@ void PlayerView::setSeries(const std::string& seriesId) {
             }
             view->setList(values, index);
             this->episodes = std::move(r.Items);
+            this->setUpNext(index);
         },
         [ASYNC_TOKEN](const std::string& error) {
             ASYNC_RELEASE
             Dialog::show(error);
         },
         jellyfin::apiShowEpisodes, seriesId, query);
+}
+
+void PlayerView::setUpNext(int index) {
+    if (index < 0 || index + 1 >= (int)this->episodes.size()) {
+        this->view->setUpNext("", "", "");
+        return;
+    }
+    auto& next = this->episodes.at(index + 1);
+    auto tag = next.ImageTags.find(jellyfin::imageTypePrimary);
+    this->view->setUpNext(fmt::format("S{}E{} - {}", next.ParentIndexNumber, next.IndexNumber, next.Name), next.Id,
+        tag != next.ImageTags.end() ? tag->second : "");
+}
+
+void PlayerView::requestSegments() {
+    std::string mediaId = this->itemId;
+    std::string url = fmt::format(fmt::runtime(jellyfin::apiMediaSegments), mediaId);
+
+    ASYNC_RETAIN
+    brls::async([ASYNC_TOKEN, mediaId, url]() {
+        auto& c = AppConfig::instance();
+        std::vector<jellyfin::MediaSegment> items;
+        try {
+            // 404 before Jellyfin 10.10, or no provider: nothing to skip
+            std::string resp = HTTP::get(c.getUrl() + url, HTTP::Header{c.getAuth(c.getToken())}, HTTP::Timeout{});
+            if (!resp.empty()) {
+                items = nlohmann::json::parse(resp).get<jellyfin::Result<jellyfin::MediaSegment>>().Items;
+            }
+        } catch (const std::exception& ex) {
+            brls::Logger::warning("PlayerView: media segments {}: {}", mediaId, ex.what());
+        }
+        brls::sync([ASYNC_TOKEN, mediaId, items]() {
+            ASYNC_RELEASE
+            // the item changed while the request was in flight
+            if (mediaId != this->itemId) return;
+            this->view->setSegments(items);
+        });
+    });
 }
 
 void PlayerView::setTitie(const std::string& title) { this->view->setTitie(title); }
@@ -170,6 +209,9 @@ bool PlayerView::playIndex(int index) {
     this->itemId = item.Id;
     this->sourceId = item.Id;
     this->setChapters(item.Chapters, item.RunTimeTicks);
+    this->view->clearSegments();
+    this->setUpNext(index);
+    this->requestSegments();
     this->playMedia(0);
     view->setTitie(fmt::format("S{}E{} - {}", item.ParentIndexNumber, item.IndexNumber, item.Name));
     return true;
